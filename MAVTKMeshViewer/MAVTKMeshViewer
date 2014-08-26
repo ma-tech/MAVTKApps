@@ -1,0 +1,261 @@
+#!/usr/bin/wish
+#ident "University of Edinburgh $Id$"
+########################################################################
+# \file         MAVTKMeshViewer
+# \author       Bill Hill
+# \date         September 2013
+# \version      $Id$
+# \par
+# Address:
+#               MRC Human Genetics Unit,
+#               MRC Institute of Genetics and Molecular Medicine,
+#               University of Edinburgh,
+#               Western General Hospital,
+#               Edinburgh, EH4 2XU, UK.
+# \par
+# Copyright (C), [2014],
+# The University Court of the University of Edinburgh,
+# Old College, Edinburgh, UK.
+# 
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; either version 2
+# of the License, or (at your option) any later version.
+#
+# This program is distributed in the hope that it will be
+# useful but WITHOUT ANY WARRANTY; without even the implied
+# warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR
+# PURPOSE.  See the GNU General Public License for more
+# details.
+#
+# You should have received a copy of the GNU General Public
+# License along with this program; if not, write to the Free
+# Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+# Boston, MA  02110-1301, USA.
+# \brief        Displays a VTK mesh with optional clipping plane.
+# \ingroup      MAVTKApps
+########################################################################
+package require vtk
+package require vtkinteraction
+
+set usage 0
+set clipping 0
+set orgX 0.0
+set orgY 0.0
+set orgZ 0.0
+set nrmX 0.0
+set nrmY 0.0
+set nrmZ 1.0
+
+set tubeRadius 0.5
+set ballRadius 1.0
+
+set ballColor     "0.0000 0.7800 0.5500"
+set backBallColor "1.0000 0.3800 0.0100"
+set tubeColor     "0.1255 0.6980 0.6667"
+set backTubeColor "1.0000 0.3800 0.0100"
+set edgeColor     "0.5294 0.8078 0.9804"
+set specColor     "1.0000 1.0000 1.0000"
+set textColor     "1.0000 0.0000 0.0000"
+
+# Parse command line
+set argIdx 0
+set argsDone 0
+set argsCount [llength $argv]
+  while {($argIdx < $argsCount) && ($argsDone == 0) && ($usage == 0)} {
+  set option [lindex $argv $argIdx]
+  if { [string index $option 0] != "-" } {
+    set argsDone 1
+  } else {
+    set argsDone 0
+    if { [string length $option] == 2 } {
+      set optVal [lindex $argv [expr $argIdx + 1]]
+      set optSpace 1
+    } else {
+      set optVal [string range $option 2 end]
+      set optSpace 0
+    }
+    set option [string index $option 1]
+    # puts stderr "option $option"
+    # puts stderr "optVal $optVal"
+    switch -glob -- $option {
+      b       { scan $optVal %g ballRadius
+                if {$optSpace != 0} {incr argIdx} }
+      o       { scan $optVal %g,%g,%g  orgX orgY orgZ
+                set clipping 1
+                if {$optSpace != 0} {incr argIdx} }
+      n       { scan $optVal %g,%g,%g  nrmX nrmY nrmZ
+                set clipping 1
+                if {$optSpace != 0} {incr argIdx} }
+      t       { scan $optVal %g tubeRadius
+                if {$optSpace != 0} {incr argIdx} }
+      h       { set usage 1 }
+      default { set usage 1 }
+    }
+    incr argIdx
+  }
+}
+if { [expr $argIdx + 1] != $argsCount } {
+  set usage 1
+}
+
+if { $usage != 0 } {
+  puts stderr "Usage: $argv0 \[-b #\] \[-h\] \[-o #,#,#\] \[-n #,#,#\]"
+  puts stderr "       \[-t #\] <mesh file>"
+  puts stderr "Displays a mesh using a ball and stick model with optional"
+  puts stderr "clipping. Clipping will be used if either the clipping plane"
+  puts stderr "origin or normal are set."
+  puts stderr "Options are:"
+  puts stderr "  -b      Ball radius."
+  puts stderr "  -h      Help, shows this usage information."
+  puts stderr "  -o      Clipping plane origin."
+  puts stderr "  -n      Clipping plane normal."
+  puts stderr "  -t      Tube radius."
+  exit
+}
+
+set inFileName [lindex $argv $argIdx]
+
+vtkRenderer ren
+
+vtkRenderWindow renWin
+  renWin AddRenderer ren
+
+vtkTextMapper txtMapper
+  set tProp [txtMapper GetTextProperty]
+  $tProp SetFontFamilyToCourier
+  $tProp SetFontSize 16
+  $tProp ShadowOn
+  $tProp SetColor 1 1 1
+vtkActor2D txtActor
+  txtActor VisibilityOff
+  txtActor SetMapper txtMapper
+vtkCellPicker picker
+  picker AddObserver EndPickEvent showPick
+
+vtkRenderWindowInteractor iren
+  iren SetRenderWindow renWin
+  iren SetPicker picker
+  iren AddObserver UserEvent {wm deiconify .vtkInteract}
+  iren AddObserver ExitEvent {exit}
+
+#vtkPolyDataReader meshReader
+vtkUnstructuredGridReader meshReader
+    meshReader SetFileName $inFileName
+
+#vtkPolyDataMapper meshMap
+vtkDataSetMapper meshMap
+  meshMap SetInput [meshReader GetOutput]
+
+vtkActor meshActor
+  meshActor SetMapper meshMap
+
+vtkExtractEdges edges
+  edges SetInput [meshReader GetOutput]
+vtkTubeFilter tubes
+  tubes SetInput [edges GetOutput]
+  tubes SetRadius $tubeRadius
+  tubes SetNumberOfSides 6
+vtkPolyDataNormals tubeNorm
+  tubeNorm SetInput [tubes GetOutput]
+
+vtkSphereSource ball
+  ball SetRadius $ballRadius
+  ball SetThetaResolution 12
+  ball SetPhiResolution 12
+vtkGlyph3D balls
+  balls SetInput [meshReader GetOutput]
+  balls SetSource [ball GetOutput]
+vtkPolyDataNormals ballNorm
+  ballNorm SetInput [balls GetOutput]
+
+# Clipping plane
+if {$clipping != 0} {
+  vtkPlane plane
+    eval plane SetOrigin $orgX $orgY $orgZ
+    plane SetNormal $nrmX $nrmY $nrmZ
+
+  vtkClipPolyData clipTube
+    clipTube SetInput [tubeNorm GetOutput]
+    clipTube SetClipFunction plane
+    clipTube GenerateClippedOutputOn
+  vtkProperty backTubeProp
+    eval backTubeProp SetDiffuseColor $backTubeColor
+  vtkPolyDataMapper clipTubeMap
+    clipTubeMap SetInput [clipTube GetOutput]
+    clipTubeMap ScalarVisibilityOff
+  vtkActor clipTubeActor
+    clipTubeActor SetMapper clipTubeMap
+    eval [clipTubeActor GetProperty] SetColor $tubeColor
+    clipTubeActor SetBackfaceProperty backTubeProp
+
+  vtkClipPolyData clipBall
+    clipBall SetInput [ballNorm GetOutput]
+    clipBall SetClipFunction plane
+    clipBall GenerateClippedOutputOn
+  vtkProperty backBallProp
+    eval backBallProp SetDiffuseColor $backBallColor
+  vtkPolyDataMapper clipBallMap
+    clipBallMap SetInput [clipBall GetOutput]
+    clipBallMap ScalarVisibilityOff
+  vtkActor clipBallActor
+    clipBallActor SetMapper clipBallMap
+    eval [clipBallActor GetProperty] SetColor $ballColor
+    clipBallActor SetBackfaceProperty backBallProp
+
+  ren AddActor clipTubeActor
+  ren AddActor clipBallActor
+} else {
+  vtkPolyDataMapper edgeMap
+    edgeMap SetInput [tubes GetOutput]
+  vtkActor edgeActor
+    edgeActor SetMapper edgeMap
+  eval [edgeActor GetProperty] SetColor $edgeColor
+    [edgeActor GetProperty] SetSpecularColor $specColor
+    [edgeActor GetProperty] SetSpecular 0.5
+    [edgeActor GetProperty] SetSpecularPower 20
+    [edgeActor GetProperty] SetAmbient 0.2
+    [edgeActor GetProperty] SetDiffuse 0.8
+
+  vtkPolyDataMapper ballsMap
+    ballsMap SetInput [balls GetOutput]
+  vtkActor ballActor
+    ballActor SetMapper ballsMap
+    eval [ballActor GetProperty] SetColor $ballColor
+    [ballActor GetProperty] SetSpecularColor $specColor
+    [ballActor GetProperty] SetSpecular 0.5
+    [ballActor GetProperty] SetSpecularPower 20
+    [ballActor GetProperty] SetAmbient 0.2
+    [ballActor GetProperty] SetDiffuse 0.8
+
+  ren AddActor ballActor
+  ren AddActor edgeActor
+}
+  
+ren AddActor2D txtActor
+ren SetBackground 255 255 255
+renWin SetSize 512 512
+renWin SetStereoType 1
+renWin Render
+
+wm withdraw .
+
+proc showPick {} {
+  set i [picker GetCellId]
+  if { $i < 0 } {
+    txtActor VisibilityOff
+  } else {
+    set selPt [picker GetSelectionPoint]
+      set x [lindex $selPt 0]
+      set y [lindex $selPt 1]
+      set pickPos [picker GetPickPosition]
+      set xp [lindex $pickPos 0]
+      set yp [lindex $pickPos 1]
+      set zp [lindex $pickPos 2]
+      txtMapper SetInput "($xp, $yp, $zp)"
+      txtActor SetPosition $x $y
+      txtActor VisibilityOn
+      puts [format "pick %d %g %g %g" $i $xp $yp $zp]
+  }
+}
+

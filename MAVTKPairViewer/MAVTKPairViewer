@@ -1,0 +1,278 @@
+#!/usr/bin/wish
+#ident "University of Edinburgh $Id$"
+########################################################################
+# \file         MAVTKPairViewer
+# \author       Bill Hill
+# \date         September 2000
+# \version      $Id$
+# \par
+# Address:
+#               MRC Human Genetics Unit,
+#               MRC Institute of Genetics and Molecular Medicine,
+#               University of Edinburgh,
+#               Western General Hospital,
+#               Edinburgh, EH4 2XU, UK.
+# \par
+# Copyright (C), [2014],
+# The University Court of the University of Edinburgh,
+# Old College, Edinburgh, UK.
+# 
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; either version 2
+# of the License, or (at your option) any later version.
+#
+# This program is distributed in the hope that it will be
+# useful but WITHOUT ANY WARRANTY; without even the implied
+# warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR
+# PURPOSE.  See the GNU General Public License for more
+# details.
+#
+# You should have received a copy of the GNU General Public
+# License along with this program; if not, write to the Free
+# Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+# Boston, MA  02110-1301, USA.
+# \brief	Displays a pair of VTK surfaces given on the command line
+#		and allows rigid body manual registration to establish
+#		a transform.
+# \ingroup	MAVTKApps
+########################################################################
+
+package require vtk
+package require vtkinteraction
+
+source /opt/vis/share/VTK/colors.tcl
+
+set cameraMsg {
+  Camera Controls (Key 'c' selects camera)
+  Key 'j'       - joystick
+  Key 't'       - trackball
+  Button 1      - rotate
+  Button 2      - pan
+  Button 3      - zoom
+  ctrl-Button 1 - spin
+}
+
+set objectMsg {
+  Actor Controls (Key 'a' selects actor)
+  Key 'j'       - joystick
+  Key 't'       - trackball
+  Button 1      - rotate
+  Button 2      - pan
+  Button 3      - scale
+  ctrl-Button 1 - spin
+  ctrl-Button 2 - dolly
+}
+
+vtkMatrix4x4 mat
+proc PrintMatricies {} {
+  for {set idx 0} {$idx < 2} {incr idx} {
+    puts "matrix $idx"
+    polyActor($idx) GetMatrix mat
+    for {set y 0} {$y < 4} {incr y} {
+      puts [format "%g %g %g %g" [mat GetElement $y 0] [mat GetElement $y 1] \
+				 [mat GetElement $y 2] [mat GetElement $y 3] ]
+    }
+  }
+}
+
+proc SaveImage {} {
+  renWin Render
+  pnmWriter Write
+}
+
+# Set Background color
+proc SetBackground {} {
+  set background [ren GetBackground]
+  .back.f1.l.r set [expr [lindex $background 0] * 255.0]
+  .back.f1.l.g set [expr [lindex $background 1] * 255.0]
+  .back.f1.l.b set [expr [lindex $background 2] * 255.0]
+  wm deiconify .back
+}
+
+proc SetOpacity {idx opacity} {
+  if {$idx == 0 || $idx == 1} { 
+    if {$opacity < 0.0} {
+      set opacity 0.0
+    } elseif {$opacity > 1.0} {
+      set opacity 1.0
+    }
+    eval [polyActor($idx) GetProperty] SetOpacity $opacity
+  }
+  renWin Render
+}
+
+proc CloseBackground {} {
+  wm withdraw .back
+}
+
+toplevel .back
+wm withdraw .back
+wm title .back "Set Background Color"
+wm protocol .back WM_DELETE_WINDOW {wm withdraw .back}
+frame .back.f1
+frame .back.f1.l  -relief raised -borderwidth 3
+scale .back.f1.l.r -from 255 -to 0 -orient vertical -background #f00 \
+      -command SetColor
+scale .back.f1.l.g -from 255 -to 0 -orient vertical -background #0f0 \
+        -command SetColor
+scale .back.f1.l.b -from 255 -to 0 -orient vertical -background #00f \
+        -command SetColor
+pack .back.f1.l.r .back.f1.l.g .back.f1.l.b -side left -fill both
+
+frame .back.f1.m -relief raised -borderwidth 3
+label .back.f1.m.sample -highlightthickness 0 -text "  Background Color  "
+pack .back.f1.m.sample -fill both -expand 1
+
+frame .back.f1.r -relief raised -borderwidth 3
+image create photo ColorWheel -file /opt/vis/share/VTK/colorwheel.ppm
+label .back.f1.r.wheel -image ColorWheel -highlightthickness 0
+bind .back.f1.r.wheel <Button-1> {
+    scan [ColorWheel get %x %y] "%%f %%f %%f" r g b
+    .back.f1.l.r set $r
+    .back.f1.l.g set $g
+    .back.f1.l.b set $b
+}
+pack .back.f1.r.wheel -fill both
+pack .back.f1.l .back.f1.m .back.f1.r -side left -expand 1 -fill both
+
+frame .back.fb
+button .back.fb.apply -text Apply -command ApplyBackground
+button .back.fb.cancel -text Cancel -command CloseBackground
+pack .back.fb.apply .back.fb.cancel -side left -expand 1 -fill x
+pack .back.f1 .back.fb -side top -fill both -expand 1
+
+proc SetColor {value} {
+    set color [format #%02x%02x%02x [.back.f1.l.r get] [.back.f1.l.g get]\
+            [.back.f1.l.b get]]
+    .back.f1.m.sample config -background $color
+}
+
+proc ApplyBackground {} {
+    global RenWin
+
+    ren SetBackground [expr [.back.f1.l.r get]/255.0] \
+            [expr [.back.f1.l.g get]/255.0] \
+            [expr [.back.f1.l.b get]/255.0]
+    renWin Render
+}
+
+# Parse the command line
+set usage 0
+set argIdx 0
+set argsDone 0
+set argsCount [llength $argv]
+while {($argIdx < $argsCount) && ($argsDone == 0) && ($usage == 0)} {
+  set option [lindex $argv $argIdx]
+  if { [string index $option 0] != "-" } {
+    set argsDone 1
+  } else {
+    set argsDone 0
+    if { [string length $option] == 2 } {
+      set optVal [lindex $argv [expr $argIdx + 1]]
+      set optSpace 1
+    } else {
+      set optVal [string range $option 2 end]
+      set optSpace 0
+    }
+    set option [string index $option 1]
+    switch -glob -- $option {
+      h       { set usage 1 }
+      default { set usage 1 }
+    }
+    incr argIdx
+  }
+}
+if {[expr $argIdx + 2] != $argsCount} {
+  set usage 1
+}
+if {$usage == 0} {
+  for {set idx 0} {$idx < 2} {incr idx} {
+    set inFileName($idx) [lindex $argv $argIdx]
+    incr argIdx
+  }
+  # Remove the default toplevel
+  wm withdraw .
+  # Create the toplevel window
+  toplevel .top
+  wm title .top "Pair Viewer ($inFileName(0) $inFileName(1))"
+  # Create frames
+  frame .top.f0
+  frame .top.f1
+  pack .top.f0 .top.f1 -side right -expand 1 -fill both
+  # Create the TkRenderWidget
+  vtkRenderWindow renWin
+  vtkTkRenderWidget .top.f0.rw -width 500 -height 500 -rw renWin
+  ::vtk::bind_tk_render_widget .top.f0.rw
+  # Build the GUI
+  pack .top.f0.rw -expand 1 -fill both
+  frame .top.f1.f0 -bg #000000 -bd 2 -relief groove
+  frame .top.f1.f1 -bg #000000 -bd 2 -relief groove
+  frame .top.f1.f2 -bg #000000 -bd 2 -relief groove
+  pack .top.f1.f0 .top.f1.f1 .top.f1.f2  -side top -expand 1 -fill both
+  scale .top.f1.f0.s0 -label "Opacity ($inFileName(0))" -orient horizontal \
+                      -length 200 -from 0 -to 1 -resolution 0.01 \
+		      -bg #ff9f00 -fg #000000 \
+		      -command "SetOpacity 0"
+  .top.f1.f0.s0 set 1.0
+  scale .top.f1.f0.s1 -label "Opacity ($inFileName(1))" -orient horizontal \
+                      -length 200 -from 0 -to 1 -resolution 0.01 \
+		      -bg #9960aa -fg #000000 \
+		      -command "SetOpacity 1" 
+  button .top.f1.f0.b0 -text "Set Background" -bg #000000 -fg #ffffff \
+                       -command SetBackground
+  button .top.f1.f0.b1 -text "Print Matricies" -bg #000000 -fg #ffffff \
+                       -command PrintMatricies
+  button .top.f1.f0.b2 -text "Save Image" -bg #000000 -fg #ffffff \
+                       -command SaveImage
+  button .top.f1.f0.b3 -text "Exit" -bg #000000 -fg #ffffff \
+                       -command exit
+  .top.f1.f0.s1 set 0.6
+  pack .top.f1.f0.s0 .top.f1.f0.s1 .top.f1.f0.b0 .top.f1.f0.b1 \
+       .top.f1.f0.b2 .top.f1.f0.b3 -side top -expand 1 -fill both
+  label .top.f1.f1.msg -bg #000000 -fg #ffffff -justify left -text $cameraMsg
+  pack .top.f1.f1.msg -side top -expand 1 -fill both
+  label .top.f1.f2.msg -bg #000000 -fg #ffffff -justify left -text $objectMsg
+  pack .top.f1.f2.msg -side top -expand 1 -fill both
+  # Setup the VTK rendering pipeline
+  vtkRenderer ren
+  set renWin [.top.f0.rw GetRenderWindow]
+    $renWin AddRenderer ren
+    $renWin SetStereoType 1
+  vtkRenderWindowInteractor iRen
+      iRen SetRenderWindow $renWin
+      iRen AddObserver ExitEvent {exit}
+  for {set idx 0} {$idx < 2} {incr idx} {
+    vtkPolyDataReader polyReader($idx)
+	polyReader($idx) SetFileName $inFileName($idx)
+    vtkPolyDataMapper polyMapper($idx)
+	polyMapper($idx) SetInput [polyReader($idx) GetOutput]
+	polyMapper($idx) GlobalImmediateModeRenderingOn
+    vtkActor polyActor($idx)
+      polyActor($idx) SetMapper polyMapper($idx)
+  }
+  eval [polyActor(0) GetProperty] SetDiffuseColor $carrot
+  eval [polyActor(0) GetProperty] SetSpecularPower 50
+  eval [polyActor(0) GetProperty] SetSpecular .5
+  eval [polyActor(0) GetProperty] SetDiffuse .8
+  eval [polyActor(1) GetProperty] SetDiffuseColor $violet
+  eval [polyActor(1) GetProperty] SetSpecularPower 50
+  eval [polyActor(1) GetProperty] SetSpecular .5
+  eval [polyActor(1) GetProperty] SetDiffuse .8
+  ren AddActor polyActor(0)
+  ren AddActor polyActor(1)
+  ren SetBackground 0 0 0
+  vtkWindowToImageFilter polyImage
+    polyImage SetInput renWin
+  vtkPNMWriter pnmWriter
+    pnmWriter SetInput [polyImage GetOutput]
+    pnmWriter SetFileName MAVTKPairViewer.ppm
+  iRen AddObserver UserEvent {wm deiconify .vtkInteract}
+  iRen Initialize
+  wm withdraw .
+  tkwait window .
+} else {
+  puts stderr "Usage: $argv0 <object 0> <object 1>"
+  puts stderr "Displays a pair of vtk surfaces in a single window."
+  exit
+}

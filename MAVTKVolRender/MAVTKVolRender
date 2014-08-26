@@ -1,0 +1,290 @@
+#!/usr/bin/wish
+#ident "University of Edinburgh $Id$"
+########################################################################
+# \file         MAVTKVolRender
+# \author       Bill Hill
+# \date         September 2003
+# \version      $Id$
+# \par
+# Address:
+#               MRC Human Genetics Unit,
+#               MRC Institute of Genetics and Molecular Medicine,
+#               University of Edinburgh,
+#               Western General Hospital,
+#               Edinburgh, EH4 2XU, UK.
+# \par
+# Copyright (C), [2014],
+# The University Court of the University of Edinburgh,
+# Old College, Edinburgh, UK.
+# 
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; either version 2
+# of the License, or (at your option) any later version.
+#
+# This program is distributed in the hope that it will be
+# useful but WITHOUT ANY WARRANTY; without even the implied
+# warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR
+# PURPOSE.  See the GNU General Public License for more
+# details.
+#
+# You should have received a copy of the GNU General Public
+# License along with this program; if not, write to the Free
+# Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+# Boston, MA  02110-1301, USA.
+# \brief        Simple volume renderer for SLC files.
+# \ingroup      MAVTKApps
+########################################################################
+package require vtk
+package require vtkinteraction
+
+## Default values ##
+set usage 0
+set debugStuff 0
+set colorInvert 0
+set colorGamma 1.0
+set colorMinR 0
+set colorMinG 0
+set colorMinB 0
+set colorMaxR 1.0
+set colorMaxG 1.0
+set colorMaxB 1.0
+set greyMin 0
+set greyMax 255
+set opacityInvert  0
+set opacityMin 0.0
+set opacityMax 0.001
+set opacityGamma  1.0
+set useGPU 0
+set fileFormat SLC
+
+## Parse the command line ##
+set argIdx 0
+set argsDone 0
+set argsCount [llength $argv]
+  while {($argIdx < $argsCount) && ($argsDone == 0) && ($usage == 0)} {
+  set option [lindex $argv $argIdx]
+  if { [string index $option 0] != "-" } {
+    set argsDone 1
+  } else {
+    set argsDone 0
+    if { [string length $option] == 2 } {
+      set optVal [lindex $argv [expr $argIdx + 1]]
+      set optSpace 1
+    } else {
+      set optVal [string range $option 2 end]
+      set optSpace 0
+    }
+    set option [string index $option 1]
+    # puts stderr "option $option"
+    # puts stderr "optVal $optVal"
+    switch -glob -- $option {
+      f	      { switch -exact $optVal {
+		  SLC { set fileFormat SLC }
+		  default {set usage 1 }
+		}
+                incr argIdx }
+      r       { scan $optVal %d,%d  greyMin greyMax 
+		if {$optSpace != 0} {incr argIdx} }
+      i       { set opacityInvert 1 }
+      m       { scan $optVal %g opacityGamma 
+		if {$optSpace != 0} {incr argIdx} }
+      o       { scan $optVal %g,%g opacityMin opacityMax 
+		if {$optSpace != 0} {incr argIdx} }
+      b       { set debugStuff 1 }
+      I       { set colorInvert 1 }
+      M       { scan $optVal %g colorGamma 
+		if {$optSpace != 0} {incr argIdx} }
+      R       { scan $optVal %g,%g colorMinR colorMaxR 
+		if {$optSpace != 0} {incr argIdx} }
+      G       { scan $optVal %g,%g colorMinG colorMaxG 
+		if {$optSpace != 0} {incr argIdx} }
+      B       { scan $optVal %g,%g colorMinB colorMaxB 
+		if {$optSpace != 0} {incr argIdx} }
+      T       {set useGPU 1}
+      h       { set usage 1 }
+      default { set usage 1 }
+    }
+    incr argIdx
+  }
+}
+if { [expr $argIdx + 1] != $argsCount } {
+  set usage 1
+}
+if { $usage != 0 } {
+  puts stderr "Usage: $argv0 \[-f\] \[-h\] \[-r #,#\] \[-i\]"
+  puts stderr "              \[-m #\] \[-o #,#\] \[-I\] \[-M #\]"
+  puts stderr "              \[-R #,#\] \[-G #,#\] \[-B #,#\] \[-U\]"
+  puts stderr "              <object file base name>"
+  puts stderr "Volume renders the given 3D object. Options are:"
+  puts stderr "-h      Help: Show this usage information."
+  if {$debugStuff != 0} {set setOrNot Set} else {set setOrNot {Not set}}
+  puts stderr "-b      Debug output. $setOrNot."
+  puts stderr "-f      File format: Range SLC. Set to $fileFormat."
+  puts stderr "-r #,#  Input grey: Range \[0-255\],\[0-255\].\
+                       Set [format %d,%d $greyMin $greyMax ]."
+  if {$opacityInvert != 0} {set setOrNot Set} else {set setOrNot {Not set}}
+  puts stderr "-i      Invert opacities. $setOrNot."
+  puts stderr "-m #    Opacity gamma: Range \[0.001-999.0\].\
+                       Set [format %g $opacityGamma]."
+  puts stderr "-o #,#  Opacity: Range \[0.0-1.0\],\[0.0-1.0\].\
+                       Set [format %g,%g $opacityMin $opacityMax]."
+  if {$colorInvert != 0} {set setOrNot Set} else {set setOrNot {Not set}}
+  puts stderr "-I      Invert output colours. $setOrNot."
+  puts stderr "-M #    Output colour gamma: Range \[0.001-999.0\]. \
+                       Set [format %g $colorGamma]."
+  puts stderr "-R #,#  Output red: Range \[0.0-1.0\],\[0.0-1.0\].\
+                       Set [format %g,%g $colorMinR $colorMaxR]."
+  puts stderr "-G #,#  Output green: Range \[0.0-1.0\],\[0.0-1.0\].\
+                       Set [format %g,%g $colorMinG $colorMaxG]."
+  puts stderr "-B #,#  Output blue: Range \[0.0-1.0\],\[0.0-1.0\].\
+                       Set [format %g,%g $colorMinB $colorMaxB]."
+  if {$useGPU != 0} {set setOrNot Set} else {set setOrNot {Not set}}
+  puts stderr "-U      Use GPU based volume rendering.\
+                       $setOrNot."
+  exit
+}
+
+## Create volume reader ##
+set infilename [lindex $argv $argIdx]
+if {$debugStuff != 0 } {
+  puts stderr "infilename $infilename"
+}
+global reader
+switch -exact $fileFormat {
+  SLC     { vtkSLCReader reader }
+}
+reader SetFileName $infilename
+
+## Create transfer functions for opacity and color ##
+vtkPiecewiseFunction opacityTransferFunction
+for {set greyI 0} {$greyI <= 255} {incr greyI} {
+  if { $greyI < $greyMin } {
+    set greyD 0.0
+    set opacity $opacityMin
+  } else {
+    if { $greyI > $greyMax } {
+      set greyD 255.0
+      set opacity $opacityMin
+    } else {
+      set greyD [ expr double($greyI) ]
+	if { $opacityGamma < 0.999 || $opacityGamma > 1.001 } {
+	  set opacity0 [ expr pow($opacityMin, $opacityGamma) ]
+	    set opacity1 [ expr pow($opacityMax, $opacityGamma) ]
+	} else {
+	  set opacity0 $opacityMin
+	    set opacity1 $opacityMax
+	}
+      if { $opacityInvert != 0 } {
+	set opacity [ expr $opacity1 - (($greyD - $greyMin) * \
+	    ($opacity1 - $opacity0) / \
+	    ($greyMax - $greyMin)) ]
+      } else {
+	set opacity [ expr  (($greyD - $greyMin) * \
+	    ($opacity1 - $opacity0) / \
+	    ($greyMax - $greyMin)) ]
+      }
+      if { $opacityGamma < 0.999 || $opacityGamma > 1.001 } {
+	set opacity [ expr pow($opacity, [ expr 1.0 / $opacityGamma ] ) ]
+      }
+    }
+  }
+  if { $debugStuff != 0 } {
+    puts stdout [ format "%3d %g" $greyI $opacity ]
+  }
+  opacityTransferFunction AddPoint $greyI $opacity
+}
+vtkColorTransferFunction colorTransferFunction
+for {set greyI 0} {$greyI <= 255} {incr greyI} {
+  if { $greyI < $greyMin } { 
+    if { $colorInvert != 0 } {
+      set colorR $colorMaxR
+      set colorG $colorMaxG
+      set colorB $colorMaxB
+    } else {
+      set colorR $colorMinR
+      set colorG $colorMinG
+      set colorB $colorMinB
+    }
+  } else {
+    if { $greyI > $greyMax } {
+      if { $colorInvert != 0 } {
+	set colorR $colorMinR
+	set colorG $colorMinG
+	set colorB $colorMinB
+      } else {
+	set colorR $colorMaxR
+	set colorG $colorMaxG
+	set colorB $colorMaxB
+      }
+    } else {
+      set colorR [ expr double($greyI - $greyMin) / ($greyMax - $greyMin) ]
+      set colorG [ expr double($greyI - $greyMin) / ($greyMax - $greyMin) ]
+      set colorB [ expr double($greyI - $greyMin) / ($greyMax - $greyMin) ]
+      if { $colorGamma < 0.999 || $colorGamma > 1.001 } {
+	set colorR [ expr pow($colorR, [ expr 1.0 / $colorGamma ] ) ]
+	set colorG [ expr pow($colorG, [ expr 1.0 / $colorGamma ] ) ]
+	set colorB [ expr pow($colorB, [ expr 1.0 / $colorGamma ] ) ]
+      }
+      set colorR [ expr ($colorR * double($colorMaxR - $colorMinR)) + \
+			$colorMinR ]
+      set colorG [ expr ($colorG * double($colorMaxG - $colorMinG)) + \
+			$colorMinG ]
+      set colorB [ expr ($colorB * double($colorMaxB - $colorMinB)) + \
+			$colorMinB ]
+    }
+  }
+  if { $debugStuff != 0 } {
+    puts stdout [ format "%3d %g %g %g" $greyI $colorR $colorG $colorB ]
+  }
+  colorTransferFunction AddRGBPoint  $greyI $colorR $colorG $colorB
+}
+
+## Create properties, mappers, volume actors, and ray cast function ##
+vtkVolumeProperty volumeProperty
+  volumeProperty SetColor colorTransferFunction
+  volumeProperty SetScalarOpacity opacityTransferFunction
+  volumeProperty ShadeOn
+  volumeProperty SetInterpolationTypeToLinear
+
+vtkVolumeRayCastCompositeFunction  compositeFunction
+
+if { $useGPU != 0 } {
+  vtkGPUVolumeRayCastMapper volumeMapper
+} else {
+  vtkVolumeRayCastMapper volumeMapper
+    volumeMapper SetVolumeRayCastFunction compositeFunction
+}
+  volumeMapper SetInput [reader GetOutput]
+
+vtkVolume volume
+  volume SetMapper volumeMapper
+  volume SetProperty volumeProperty
+
+## Create the renderer, render window  and interactor ##
+vtkRenderer ren
+
+vtkRenderWindow renWin
+  renWin AddRenderer ren
+  renWin SetSize 256 256
+  renWin SetStereoType 1
+
+vtkRenderWindowInteractor iren
+  iren SetRenderWindow renWin
+
+  ren AddVolume volume
+  if { $colorInvert != 0 } {
+    ren SetBackground $colorMaxR $colorMaxG $colorMaxB
+  } else {
+    ren SetBackground $colorMinR $colorMinG $colorMinB
+  }
+
+  renWin Render
+
+
+  iren SetRenderWindow renWin
+  iren AddObserver UserEvent {wm deiconify .vtkInteract}
+  iren AddObserver ExitEvent {exit}
+  iren Initialize
+
+  wm withdraw .

@@ -1,0 +1,122 @@
+#!/usr/bin/wish
+
+package require vtk
+package require vtkinteraction
+
+source /opt/vis/share/VTK/colors.tcl
+
+proc usage {} {
+  global argv0
+  puts stderr "Usage: $argv0 file.vtk"
+  puts stderr "A simple VTK file vewer for VTK polydata surfaces."
+  puts stderr "Keys:"
+  puts stderr "  3 - 3D stereo rendering (if possible)"
+  puts stderr "  h - prints this usage information"
+  puts stderr "  j - joystick camera movement control using mouse"
+  puts stderr "  m - measurement mode (parallel projection and distance widget)"
+  puts stderr "  n - non-measurement mode"
+  puts stderr "  o - output screen shout to the file out.ppm"
+  puts stderr "  p - pick point under mouse and print coordinates"
+  puts stderr "  q - quit"
+  puts stderr "  s - solid representation"
+  puts stderr "  t - trackball camera movement control using mouse"
+  puts stderr "  w - wireframe representation"
+  puts stderr ""
+}
+
+
+if {$argc != 1} {
+  usage
+  exit
+} else {
+  vtkRenderer ren
+  vtkCamera cam
+  vtkRenderWindow renWin
+    renWin AddRenderer ren
+  vtkTextMapper txtMapper
+    set tProp [txtMapper GetTextProperty]
+    $tProp SetFontFamilyToCourier
+    $tProp SetFontSize 16
+    $tProp ShadowOn
+    $tProp SetColor 1 0 0
+  vtkActor2D txtActor
+    txtActor VisibilityOff
+    txtActor SetMapper txtMapper
+  vtkCellPicker picker
+    picker AddObserver EndPickEvent showPick
+  vtkRenderWindowInteractor iren
+    iren SetRenderWindow renWin
+    iren SetPicker picker
+    iren AddObserver KeyPressEvent keyPressCB
+    iren AddObserver UserEvent {wm deiconify .vtkInteract}
+    iren AddObserver ExitEvent {exit}
+  vtkDistanceWidget dist
+    dist SetInteractor iren
+    dist CreateDefaultRepresentation
+  set inFileName [lindex $argv 0]
+  vtkPolyDataReader polyReader
+      polyReader SetFileName $inFileName
+  vtkPolyDataMapper polyMapper
+      polyMapper SetInput [polyReader GetOutput]
+  vtkActor polyActor 
+      polyActor SetMapper polyMapper
+  ren AddActor polyActor 
+  ren AddActor2D txtActor
+  ren SetBackground 0 0 0 
+  set cam [ren GetActiveCamera]
+  renWin SetSize 512 512
+  renWin SetStereoType 1
+  vtkWindowToImageFilter polyImage
+    polyImage SetInput renWin
+  vtkPNMWriter pnmWriter
+    pnmWriter SetInput [polyImage GetOutput]
+    pnmWriter SetFileName out.ppm
+    renWin Render
+    ren SetActiveCamera cam
+    ren ResetCamera
+    renWin Render
+  wm withdraw .
+}
+##
+proc showPick {} {
+  set i [picker GetCellId]
+  if { $i < 0 } {
+    txtActor VisibilityOff
+  } else {
+    set selPt [picker GetSelectionPoint]
+      set x [lindex $selPt 0]
+      set y [lindex $selPt 1]
+      set pickPos [picker GetPickPosition]
+      set xp [lindex $pickPos 0]
+      set yp [lindex $pickPos 1]
+      set zp [lindex $pickPos 2]
+      txtMapper SetInput "($xp, $yp, $zp)"
+      txtActor SetPosition $x $y
+      txtActor VisibilityOn
+      puts [format "pick %d %g %g %g" $i $xp $yp $zp]
+  }
+}
+
+proc keyPressCB {} {
+  switch [iren GetKeySym] { 
+    "h" {usage}
+    "o" {pnmWriter Write}
+    "m" {setMeasureMode 1}
+    "n" {setMeasureMode 0}
+    default {} 
+  }
+}
+
+proc setMeasureMode {mode} {
+  if {$mode == 0} {
+    dist Off
+    ren ResetCamera
+    cam SetParallelProjection 0
+  } else {
+    dist On
+    ren ResetCamera
+    cam SetParallelProjection 1
+  }
+  renWin Render
+}
+
