@@ -101,7 +101,7 @@ set argsCount [llength $argv]
 		if {$optSpace != 0} {incr argIdx} }
       B       { scan $optVal %g,%g colorMinB colorMaxB 
 		if {$optSpace != 0} {incr argIdx} }
-      T       {set useGPU 1}
+      U       {set useGPU 1}
       h       { set usage 1 }
       default { set usage 1 }
     }
