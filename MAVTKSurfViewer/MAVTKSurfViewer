@@ -1,0 +1,956 @@
+#!/usr/bin/python
+###
+#ident "University of Edinburgh $Id$"
+# \file         MAVTKSurfViewer.py
+# \author       Bill Hill
+# \date         December 2015
+# \version      $Id$
+# \par
+# Address:
+#               MRC Human Genetics Unit,
+#               MRC Institute of Genetics and Molecular Medicine,
+#               University of Edinburgh,
+#               Western General Hospital,
+#               Edinburgh, EH4 2XU, UK.
+# \par
+# Copyright (C), [2015],
+# The University Court of the University of Edinburgh,
+# Old College, Edinburgh, UK.
+# 
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; either version 2
+# of the License, or (at your option) any later version.
+#
+# This program is distributed in the hope that it will be
+# useful but WITHOUT ANY WARRANTY; without even the implied
+# warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR
+# PURPOSE.  See the GNU General Public License for more
+# details.
+#
+# You should have received a copy of the GNU General Public
+# License along with this program; if not, write to the Free
+# Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+# Boston, MA  02110-1301, USA.
+# \brief        Interactive display of surfaces.
+# \ingroup      MAVTKApps
+###
+
+import io
+import os
+import sys
+import json
+import math
+import time
+import argparse
+from PyQt4 import Qt, QtCore, QtGui
+import vtk
+from vtk.qt4.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
+
+from __future__ import print_function
+
+class MAVTKRenderer(): #{
+
+  def __init__(self): #{
+    self.initUI()
+  #}
+    
+  def initUI(self): #{
+    self.frame = QtGui.QFrame()
+    vl = QtGui.QVBoxLayout()
+    self.vtkWidget = QVTKRenderWindowInteractor(self.frame)
+    vl.addWidget(self.vtkWidget)
+    self.frame.setLayout(vl)
+  #}
+
+  def init(self): #{
+    self.ren = vtk.vtkRenderer()
+    self.picker = vtk.vtkCellPicker()
+    self.renWin = self.vtkWidget.GetRenderWindow()
+    self.renWin.AddRenderer(self.ren)
+    iren  = self.renWin.GetInteractor()
+    istyle = vtk.vtkInteractorStyleSwitch()
+    iren.SetInteractorStyle(istyle)
+    istyle.SetCurrentStyleToTrackballCamera()
+    iren.SetPicker(self.picker)
+    iren.Initialize()
+  #}
+
+  def getIRen(self): #{
+    return self.renWin.GetInteractor()
+  #}
+
+  def getRenWin(self): #{
+    return self.renWin
+  #}
+
+  def getRen(self): #{
+    return self.ren
+  #}
+
+  def getPicker(self): #{
+    return self.picker
+  #}
+
+  def getFrame(self): #{
+    return self.frame
+  #}
+
+  def Render(self): #{
+   self.renWin.Render()
+   self.vtkWidget.update()
+ #}
+
+  def writeFrameToFile(self, path): #{
+    ok = True
+    file_type = path.split(".")[-1]
+    img = vtk.vtkWindowToImageFilter()
+    writer = None
+    if file_type == 'bmp': #{
+      writer = vtk.vtkBMPWriter()
+    elif file_type == 'png': #}{
+      writer = vtk.vtkPNGWriter()
+    elif file_type == 'pnm' or file_type == 'ppm': #}{
+      writer = vtk.vtkPNMWriter()
+    elif file_type == 'tif' or file_type == 'tiff': #}{
+      writer = vtk.vtkTIFFWriter()
+    #}
+    if(writer): #{
+      img.SetInput(self.renWin)
+      writer.SetInputConnection(img.GetOutputPort())
+      writer.SetFileName(str(path))
+      self.ren.Render()
+      writer.Write()
+    else: #}{
+      ok = False
+      result = QtGui.QMessageBox.critical(self.frame,
+                   'Error',
+                   'Unsupported file format (' + str(file_type) + ').',
+                   QtGui.QMessageBox.Close)
+    #}
+    return not ok
+  #}
+#}
+
+class MAVTKActorTable(QtGui.QDialog): #{
+
+  colorChangeSignal = QtCore.pyqtSignal(int, Qt.QColor)
+  opacityChangeSignal = QtCore.pyqtSignal(int, float)
+
+  def __init__(self): #{
+    super(MAVTKActorTable, self).__init__()
+    self.tableDict = {'Index'   : 0,
+                      'Name'    : 1,
+                      'Color'   : 2,
+                      'Opacity' : 3,
+                      'Path'    : 4}
+    self.tableKeys = ['Index', 'Name', 'Color', 'Opacity', 'Path']
+    self.actors = []
+    self.initUI()
+  #}
+
+  def initUI(self): #{
+    self.setWindowTitle('Actor Table')
+    tl = QtGui.QHBoxLayout()
+    self.setLayout(tl)
+    self.table = QtGui.QTableWidget(0, 5)
+    tl.addWidget(self.table)
+    self.table.setSizePolicy(QtGui.QSizePolicy.Expanding,
+                             QtGui.QSizePolicy.Expanding)
+    self.table.verticalHeader().setVisible(False)
+    self.table.horizontalHeader().setStretchLastSection(True)
+    self.table.setHorizontalHeaderLabels(self.tableKeys)
+    self.table.cellClicked.connect(self.cellClicked)
+    self.table.cellChanged.connect(self.cellChanged)
+    self.table.setSelectionBehavior(QtGui.QAbstractItemView.SelectRows)
+  #}
+
+  def textToFloat(self, txt): #{
+    try: #{
+      val = float(txt)
+      if(val < 0.0):
+        val = 0.0
+      elif(val > 1.0):
+        val = 1.0
+    except ValueError: #}{
+      val = 0.0
+    #}
+    return val
+  #}
+
+  def delActor(self, idx): #{
+    # TODO allow actor deletion
+    # Currently actors are not deleted and simple table index allows
+    # actor selection
+    print('delActor() - not implemented', file=sys.stderr)
+  #}
+
+  def addActor(self, actor, name, color, opacity, path): #{
+    idx = len(self.actors)
+    self.actors.insert(idx, actor)
+    self.table.insertRow(idx)
+    self.setActorIndex(idx)
+    self.setActorName(idx, name)
+    self.setActorColor(idx, color)
+    self.setActorOpacity(idx, opacity)
+    self.setActorPath(idx, path)
+  #}
+
+  def setActorIndex(self, idx): #{
+    itm = QtGui.QTableWidgetItem(str(idx))
+    itm.setFlags(itm.flags() & (~QtCore.Qt.ItemIsEditable))
+    self.table.setItem(idx, self.tableDict['Index'], itm)
+  #}
+
+  def setActorName(self, idx, name): #{
+    itm = QtGui.QTableWidgetItem(name)
+    self.table.setItem(idx, self.tableDict['Name'], itm)
+  #}
+
+  def setActorColor(self, idx, color): #{
+    itm = QtGui.QTableWidgetItem()
+    itm.setBackgroundColor(color)
+    itm.setFlags(itm.flags() & (~QtCore.Qt.ItemIsEditable))
+    self.table.setItem(idx, self.tableDict['Color'], itm)
+  #}
+
+  def setActorOpacity(self, idx, opacity): #{
+    setval = not bool(self.table.item(idx, self.tableDict['Opacity']))
+    if(not setval): #{
+      txt = self.table.item(idx, self.tableDict['Opacity']).text()
+      val = self.textToFloat(txt)
+      if(math.fabs(val - opacity) >= 0.0001): #{
+        opacity = val
+        setval = true
+      #}
+    #}
+    if(setval): #{
+      itm = QtGui.QTableWidgetItem(str(opacity))
+      self.table.setCellWidget(idx, self.tableDict['Opacity'], None)
+      self.table.setItem(idx, self.tableDict['Opacity'], itm)
+    #}
+  #}
+
+  def setActorPath(self, idx, path): #{
+    itm = QtGui.QTableWidgetItem(path)
+    itm.setFlags(itm.flags() & (~QtCore.Qt.ItemIsEditable))
+    self.table.setItem(idx, self.tableDict['Path'], itm)
+  #}
+
+  def getNumActors(self): #{
+    return self.table.rowCount()
+  #}
+
+  def getActor(self, idx): #{
+    actor = self.actors[idx]
+    return actor
+  #}
+
+  def getActorName(self, idx): #{
+    name = str(self.table.item(idx, self.tableDict['Name']).text())
+    return name
+  #}
+
+  def getActorColor(self, idx): #{
+    q_col = self.table.item(idx, self.tableDict['Color']).backgroundColor()
+    return q_col
+  #}
+
+  def getActorOpacity(self, idx): #{
+    opacity = float(self.table.item(idx, self.tableDict['Opacity']).text())
+    return opacity
+  #}
+
+  def getActorPath(self, idx): #{
+    path = str(self.table.item(idx, self.tableDict['Path']).text())
+    return path
+  #}
+
+  def cellClicked(self, idx, prop): #{
+    if prop == self.tableDict['Color']: #{
+      col = QtGui.QColorDialog.getColor()
+      if col.isValid(): #{
+        self.colorChangeSignal.emit(idx, col)
+      #}
+    #}
+  #}
+
+  def cellChanged(self, idx, prop): #{
+    if prop == self.tableDict['Opacity']: #{
+      txt = self.table.item(idx, prop).text()
+      val = self.textToFloat(txt)
+      self.opacityChangeSignal.emit(idx, val)
+    #}
+  #}
+#}
+
+
+class AboutDialog(QtGui.QDialog): #{
+
+  def __init__(self, parent = None): #{
+    super(AboutDialog, self).__init__(parent)
+    self.initUI()
+  #}
+
+  def initUI(self): #{
+    msg = '<b>MAVTKSurfViewer</b>' + \
+          '<p>A VTK based multiple surface viewer.</p>' + \
+          '<p>ma-tech@igmm.ed.ac.uk</p>'
+    lo = QtGui.QVBoxLayout(self)
+    txt = QtGui.QLabel(msg)
+    lo.addWidget(txt)
+    but = QtGui.QDialogButtonBox(
+              QtGui.QDialogButtonBox.Cancel,
+              QtCore.Qt.Horizontal, self)
+    but.rejected.connect(self.cancel)
+    lo.addWidget(but)
+  #}
+
+  def cancel(self): #{
+    self.hide()
+  #}
+    
+class ControlsDialog(QtGui.QDialog): #{
+
+  def __init__(self, parent = None): #{
+    super(ControlsDialog, self).__init__(parent)
+    self.initUI()
+  #}
+
+  def initUI(self): #{
+    msg = '<b>MAVTKSurfViewer Interactive Controls</b>' + \
+    '<br>' + \
+    '<p>The visualisation can be controlled by a set of keyboard ' + \
+    'and mouse actions which are common across most VTK based ' + \
+    'applications</p>' + \
+    '<br>' + \
+    '<p><table>' + \
+    '<tr><td>Key a</td><td> - manipulate the actor</td></tr>' + \
+    '<tr><td>Key c</td><td> - manipulate the camera</td></tr>' + \
+    '<tr><td>Key j</td><td> - joystick manipulation mode</td></tr>' + \
+    '<tr><td>Key t</td><td> - trackball manipulation mode</td></tr>' + \
+    '<tr><td>Key p</td><td> - pick actor</td></tr>' + \
+    '<tr><td>Key s</td><td> - solid surfaces</td></tr>' + \
+    '<tr><td>Key w</td><td> - wireframe surfaces</td></tr>' + \
+    '<tr><td>Key 3</td><td> - toggle 3D stereo</td></tr>' + \
+    '<tr><td>Button 1</td><td> - rotate</td></tr>' + \
+    '<tr><td>Button 2</td><td> - pan</td></tr>' + \
+    '<tr><td>Button 3</td><td> - zoom</td></tr>' + \
+    '<tr><td>Ctrl-Button 1</td><td> - spin</td></tr>' + \
+    '<tr><td>Ctrl-Button 2</td><td> - dolly</td></tr>' + \
+    '</table></p>' + \
+    '<p>Camera mode, trackball mode and solid surfaces are the defaults' + \
+    'used.</p>'
+    lo = QtGui.QVBoxLayout(self)
+    txt = QtGui.QLabel(msg)
+    lo.addWidget(txt)
+    but = QtGui.QDialogButtonBox(
+              QtGui.QDialogButtonBox.Cancel,
+              QtCore.Qt.Horizontal, self)
+    but.rejected.connect(self.cancel)
+    lo.addWidget(but)
+  #}
+
+  def cancel(self): #{
+    self.hide()
+  #}
+#}
+    
+
+class MovieCreationState(object): #{
+  stop  = 0
+  run   = 1
+#}
+
+class MovieCreationDialog(QtGui.QDialog): #{
+  current_path = ''
+
+  def __init__(self, parent = None): #{
+    super(MovieCreationDialog, self).__init__(parent)
+    self.initUI()
+    self.state = MovieCreationState.stop
+  #}
+
+  def initUI(self): #{
+    lov = QtGui.QVBoxLayout(self)
+    fr_main = QtGui.QFrame()
+    buttons = QtGui.QDialogButtonBox(QtGui.QDialogButtonBox.Cancel,
+                  QtCore.Qt.Horizontal, self)
+    lov.addWidget(fr_main)
+    lov.addWidget(buttons)
+    loh  = QtGui.QHBoxLayout()
+    fr_main.setLayout(loh)
+    fr_fxr  = QtGui.QFrame()
+    fr_ctl  = QtGui.QFrame()
+    loh.addWidget(fr_fxr)
+    loh.addWidget(fr_ctl)
+    lo_fxr  = QtGui.QGridLayout(fr_fxr)
+    lo_ctl  = QtGui.QGridLayout(fr_ctl)
+    lb_fxr = QtGui.QLabel('Fixed Rotations')
+    lb_fxr.setAlignment(QtCore.Qt.AlignCenter)
+    lo_fxr.addWidget(lb_fxr, 0, 0, 1, 4)
+    lb_nos = QtGui.QLabel('Number of Steps')
+    lb_nos.setAlignment(QtCore.Qt.AlignLeft)
+    lo_fxr.addWidget(lb_nos, 1, 0, 1, 2)
+    self.sp_nos = QtGui.QSpinBox()
+    self.sp_nos.setRange(0, 99999999)
+    self.sp_nos.setValue(0)
+    lo_fxr.addWidget(self.sp_nos, 1, 3, 1, 1)
+    lb_dps = QtGui.QLabel('Degrees per Step')
+    lb_dps.setAlignment(QtCore.Qt.AlignLeft)
+    lo_fxr.addWidget(lb_dps, 2, 0, 1, 2)
+    self.sp_dps = QtGui.QSpinBox()
+    self.sp_dps.setRange(-359, 359)
+    self.sp_dps.setValue(0)
+    lo_fxr.addWidget(self.sp_dps, 2, 3, 1, 1)
+    lb_axis = QtGui.QLabel('Axis')
+    lb_axis.setAlignment(QtCore.Qt.AlignLeft)
+    lo_fxr.addWidget(lb_axis, 3, 0, 1, 2)
+    self.cb_axis = QtGui.QComboBox()
+    self.cb_axis.addItems(['X', 'Y', 'Z'])
+    lo_fxr.addWidget(self.cb_axis, 3, 2, 1, 2)
+    lb_ctl = QtGui.QLabel('Movie Controls')
+    lb_ctl.setAlignment(QtCore.Qt.AlignCenter)
+    lo_ctl.addWidget(lb_ctl, 0, 0, 1, 4)
+    lb_file = QtGui.QLabel('Base file name')
+    lb_file.setAlignment(QtCore.Qt.AlignLeft)
+    lo_ctl.addWidget(lb_file, 1, 0, 1, 2)
+    bt_file = QtGui.QPushButton('Browse ...')
+    lo_ctl.addWidget(bt_file, 1, 3, 1, 1)
+    self.le_path = QtGui.QLineEdit('... select file ...')
+    lo_ctl.addWidget(self.le_path, 2, 0, 1, 4)
+    lb_fix = QtGui.QLabel('File index')
+    lb_fix.setAlignment(QtCore.Qt.AlignLeft)
+    lo_ctl.addWidget(lb_fix, 3, 0, 1, 2)
+    self.sp_fix = QtGui.QSpinBox()
+    self.sp_fix.setRange(0, 99999999)
+    self.sp_fix.setValue(0)
+    lo_ctl.addWidget(self.sp_fix, 3, 2, 1, 2)
+    self.bt_start = QtGui.QPushButton('Start')
+    lo_ctl.addWidget(self.bt_start, 4, 0, 1, 2)
+    self.bt_stop = QtGui.QPushButton('Stop')
+    lo_ctl.addWidget(self.bt_stop, 4, 2, 1, 2)
+    bt_file.clicked.connect(self.selectFile)
+    buttons.rejected.connect(self.cancel)
+  #}
+
+  def cancel(self): #{
+    self.hide()
+  #}
+
+  def setStateRun(self): #{
+    self.state = MovieCreationState.run
+  #}
+
+  def setStateStop(self): #{
+    self.state = MovieCreationState.stop
+  #}
+
+  def stateIsStop(self): #{
+    QtGui.QApplication.processEvents()
+    return self.state == MovieCreationState.stop
+  #}
+
+  def selectFile(self): #{
+    path = QtGui.QFileDialog.getOpenFileName(self, 'Select base movie file',
+               self.current_path,
+               'Image files (*.bmp *.png *.pnm *.tif *.tiff);;' +
+               'All files (*)')
+    if(path): #{
+      self.le_path.setText(path)
+    #}
+  #}
+  
+  def getNumStep(self): #{
+    return self.sp_nos.value()
+  #}
+
+  def getDegPerStep(self): #{
+    return self.sp_dps.value()
+  #}
+
+  def getAxis(self): #{
+    return str(self.cb_axis.currentText())
+  #}
+
+  def getFilename(self): #{
+    return str(self.le_path.text())
+  #}
+
+  def getFileIndex(self): #{
+    return self.sp_fix.value()
+  #}
+
+  def setFileIndex(self, value): #{
+    self.sp_fix.setValue(value)
+  #}
+
+  def incFileIndex(self): #{
+    self.sp_fix.setValue(self.sp_fix.value() + 1)
+  #}
+
+  def getStartPB(self): #{
+    return self.bt_start
+  #}
+
+  def getStopPB(self): #{
+    return self.bt_stop
+  #}
+#}
+
+
+class MAVTKSurfViewer(QtGui.QMainWindow): #{
+  version = '0.0.1'
+  actor_file_ident = 'MAVTKSurfViewer Actor Settings'
+  file_formats = ['obj', 'stl', 'vtk']
+  animation = 0
+  movie = None
+
+  def __init__(self, files): #{
+    super(MAVTKSurfViewer, self).__init__()
+    self.current_path = ''
+    self._def_opacity = 1.0
+    self._def_color = [1.0, 1.0, 1.0]
+    self.initUI(files)
+  #}
+
+  def initUI(self, files): #{
+    iCol = [1.0, 1.0, 1.0]
+    ## Actor table
+    self.actors = MAVTKActorTable()
+    ### Menubar
+    menubar = self.menuBar()
+    fMenu = menubar.addMenu('&File')
+    aMenu = menubar.addMenu('&Actions')
+    vMenu = menubar.addMenu('&View')
+    menubar.addSeparator()
+    hMenu = menubar.addMenu('&Help')
+    ## 
+    fOpen = QtGui.QAction(QtGui.QIcon('open.png'), 'Open', self)
+    fOpen.setShortcut('Ctrl+O')
+    fOpen.setStatusTip('Open new surface file')
+    fOpen.triggered.connect(self.openFile)
+    fMenu.addAction(fOpen)
+    # 
+    fSaveImage = QtGui.QAction(QtGui.QIcon('save.png'), 'Save Image', self)
+    fSaveImage.setShortcut('Ctrl+I')
+    fSaveImage.setStatusTip('Save rendered image')
+    fSaveImage.triggered.connect(self.saveImage)
+    fMenu.addAction(fSaveImage)
+    # 
+    fSaveActors = QtGui.QAction(QtGui.QIcon('save.png'), 'Save Actors', self)
+    fSaveActors.setStatusTip('Save actor settings')
+    fSaveActors.triggered.connect(self.saveActors)
+    fMenu.addAction(fSaveActors)
+    # 
+    fLoadActors = QtGui.QAction(QtGui.QIcon('save.png'), 'Load Actors', self)
+    fLoadActors.setStatusTip('Load actor settings')
+    fLoadActors.triggered.connect(self.loadActors)
+    fMenu.addAction(fLoadActors)
+    #
+    fExit  = QtGui.QAction(QtGui.QIcon('exit.png'), 'Exit', self)
+    fExit.setShortcut('Ctrl+Q')
+    fExit.setStatusTip('Exit Application')
+    fExit.triggered.connect(self.quit)
+    fMenu.addAction(fExit)
+    ##
+    self.movie = MovieCreationDialog()
+    aMovie = QtGui.QAction('Create Movie', self)
+    aMovie.setShortcut('Ctrl+M')
+    aMovie.setStatusTip('Open movie creation dialog')
+    aMovie.triggered.connect(self.createMovie)
+    aMenu.addAction(aMovie)
+    self.movie.getStartPB().clicked.connect(self.movieStart)
+    self.movie.getStopPB().clicked.connect(self.movieStop)
+    ##
+    vSetBackground = QtGui.QAction('Set Background', self)
+    vSetBackground.setShortcut('Ctrl+B')
+    vSetBackground.setStatusTip('Set render window background colour')
+    vSetBackground.triggered.connect(self.setBackground)
+    vMenu.addAction(vSetBackground)
+    #
+    vShowTable = QtGui.QAction('Show Actor Table', self)
+    vShowTable.setShortcut('Ctrl+T')
+    vShowTable.setStatusTip('Show actor table')
+    vShowTable.triggered.connect(self.showTable)
+    vMenu.addAction(vShowTable)
+    #
+    vViewAll = QtGui.QAction('View All', self)
+    vViewAll.setShortcut('Ctrl+R')
+    vViewAll.setStatusTip('View all actors')
+    vViewAll.triggered.connect(self.resetView)
+    vMenu.addAction(vViewAll)
+    ##
+    self.controls = ControlsDialog()
+    hControls = QtGui.QAction(QtGui.QIcon('help.png'), 'Controls', self)
+    hControls.setStatusTip('Interactive controls')
+    hControls.triggered.connect(self.showControls)
+    hMenu.addAction(hControls)
+    #
+    self.about = AboutDialog()
+    hAbout = QtGui.QAction(QtGui.QIcon('help.png'), 'About', self)
+    hAbout.setStatusTip('About MAVTKSurfViewer')
+    hAbout.triggered.connect(self.showAbout)
+    hMenu.addAction(hAbout)
+    #
+    self.statusBar()
+    self.setGeometry(256, 256, 768, 768)
+    self.setWindowTitle('MAVTKSurfViewer')
+    #
+    self.actors.colorChangeSignal.connect(self.setActorColor)
+    self.actors.opacityChangeSignal.connect(self.setActorOpacity)
+    #
+    self.ren = MAVTKRenderer()
+    self.setCentralWidget(self.ren.getFrame())
+    self.show()
+    self.ren.init()
+    # Read files given on command line
+    r = 4203829009 # seed for an OK sequence of colors
+    for f in files: #{
+      self.addSurf(os.path.basename(f), iCol, self._def_opacity, f)
+      r = self.getRandomColor(r, iCol)
+    #}
+    # Add pick observer
+    self.ren.getPicker().AddObserver("EndPickEvent", self.cellPicked)
+    # Reset the camera to view all
+    self.ren.getRen().ResetCamera()
+  #}
+
+  def getRandomColor(self, r, cols): #{
+    d = 0.0
+    e = 0.0
+    while (d < 1.0) and ((e < 1.0) or (e > 2.0)): #{
+      d = 0.0
+      e = 0.0
+      for i in range(0,3): #{
+        if r == 0: #{
+          r = 255
+        else: #}{
+          r = (r * 279470273) % 4294967291
+        #}
+        c = float(r & 255) / 255.0
+        d = d + math.fabs(c - cols[i])
+        e = e + c
+        cols[i] = c
+      #}
+    #}
+    return r
+  #}
+
+  def quit(self): #{
+    sys.exit(0)
+  #}
+
+
+  def showAbout(self): #{
+    self.about.show()
+  #}
+
+  def showControls(self): #{
+    self.controls.show()
+  #}
+
+  def cellPicked(self, object, event): #{
+    picker = self.ren.getPicker()
+    if picker.GetCellId() >= 0: #{
+      pActor = picker.GetActor();
+      actorArray = self.actors.actors
+      for idx in range(0, len(actorArray)): #{
+        if actorArray[idx] == pActor: #{
+          self.actors.table.selectRow(idx)
+        #}
+      #}
+    #}
+  #}
+
+  def addSurf(self, name, v_col, opacity, path): #{
+    file_type = path.split(".")[-1]
+    if file_type in self.file_formats: #{
+      if file_type == 'obj': #{
+        reader = vtk.vtkOBJReader()
+      elif file_type == 'stl': #}{
+        reader = vtk.vtkSTLReader()
+      elif file_type == 'vtk': #}{
+        reader = vtk.vtkPolyDataReader()
+    #}
+    reader.SetFileName(path)
+    mapper = vtk.vtkPolyDataMapper()
+    mapper.SetInputConnection(reader.GetOutputPort())
+    actor = vtk.vtkActor()
+    actor.SetMapper(mapper)
+    actor.GetProperty().SetOpacity(opacity)
+    actor.GetProperty().SetDiffuseColor(v_col)
+    actor.GetProperty().SetAmbient(0.2);
+    actor.GetProperty().SetDiffuse(0.6);
+    actor.GetProperty().SetSpecular(0.2);
+    actor.GetProperty().SetSpecularPower(3.0);
+    self.ren.getRen().AddActor(actor)
+    self.ren.Render()
+    q_col = Qt.QColor(255 * v_col[0], 255 * v_col[1], 255 * v_col[2])
+    self.actors.addActor(actor, name, q_col, opacity, path)
+  #}
+
+  def openFile(self): #{
+    c = ''
+    s = 'Surface files ('
+    for f in self.file_formats:
+      s = s + c + '*.' + f
+      c = ' '
+    s = s + ');; All files (*)'
+    path = QtGui.QFileDialog.getOpenFileName(self, 'Open surface file',
+               self.current_path, s)
+    if(path): #{
+      p = str(path)
+      self.addSurf(os.path.basename(p), self._def_color, self._def_opacity, p)
+    #}
+  #}
+
+  def saveImage(self): #{
+    path = QtGui.QFileDialog.getSaveFileName(self, 'Write rendered image',
+               self.current_path,
+               'Image files (*.bmp *.png *.pnm *.tif *.tiff);;' +
+               'All files (*)')
+    if(path): #{
+      if not self.ren.writeFrameToFile(path):
+        QtGui.QMessageBox.critical(self.frame,
+                   'Error',
+                   'Failed to write image to file ' + path + '.',
+                   QtGui.QMessageBox.Close)
+    #}
+  #}
+
+  def saveActors(self): #{
+    path = QtGui.QFileDialog.getSaveFileName(self, 'Write actor settings',
+               self.current_path,
+               'Actor settings files (*.jsn *.jason);;All files (*)')
+    n_act = self.actors.getNumActors()
+    act_ary = []
+    for idx in range(0, n_act): #{
+      col = self.actors.getActorColor(idx)
+      act_ary.append( \
+        { \
+          'name': self.actors.getActorName(idx), \
+          'color': [col.red(), col.blue(), col.green()], \
+          'opacity': self.actors.getActorOpacity(idx), \
+          'path': self.actors.getActorPath(idx) \
+        })
+    #}
+    data = { \
+      'ident': self.actor_file_ident, \
+      'version': self.version, \
+      'num_actors': n_act, \
+      'actors': act_ary
+      }
+    if(path): #{
+      try: #{
+        f = io.open(str(path), 'w', encoding='utf-8')
+        f.write(unicode(json.dumps(data)))
+        f.close()
+      except: #}{
+        QtGui.QMessageBox.critical(self,
+            'Error',
+            'Failed to write actor setting to file ' + path + '.',
+            QtGui.QMessageBox.Close)
+      #}
+    #}
+  #}
+
+  def loadActors(self): #{
+    path = QtGui.QFileDialog.getOpenFileName(self, 'Load actor settings',
+               self.current_path,
+               'Actor settings files (*.jsn *.jason);;All files (*)')
+    if(path): #{
+      n_act = 0
+      data = None
+      try: #{
+        f = io.open(str(path), 'r')
+        data = json.load(f)
+        f.close()
+        if bool(data): #{
+          n_act = int(data['num_actors'])
+          if (not str(data['ident']) == self.actor_file_ident) or \
+             (n_act < 0): #{
+            data = None
+          #}
+        #}
+      except: #}{
+        data = None
+      #}
+      if bool(data): #{
+        act_ary = data['actors']
+        for idx in range(0, n_act): #{
+          act = act_ary[idx]
+          name = str(act['name'])
+          col = act['color']
+          v_col = [float(col[0]) / 255.0, \
+                   float(col[1]) / 255.0, \
+                   float(col[2]) / 255.0]
+          opacity = float(act['opacity'])
+          path = str(act['path'])
+          self.addSurf(name, v_col, opacity, path)
+        #}
+      #}
+      if not bool(data): #{
+        QtGui.QMessageBox.critical(self,
+            'Error',
+            'Failed to write actor setting to file ' + path + '.',
+            QtGui.QMessageBox.Close)
+               
+      #}
+    #}
+  #}
+
+  def getNumActors(self): #{
+    return self.table.rowCount()
+  #}
+
+  def getActor(self, idx): #{
+    actor = self.actors[idx]
+    return actor
+  #}
+
+  def getActorName(self, idx): #{
+    name = str(self.table.item(idx, self.tableDict['Name']).text())
+    return name
+  #}
+
+  def getActorColor(self, idx): #{
+    q_col = self.table.item(idx, self.tableDict['Color']).backgroundColor()
+    return q_col
+  #}
+
+  def getActorOpacity(self, idx): #{
+    opacity = float(self.table.item(idx, self.tableDict['Opacity']).text())
+    return opacity
+  #}
+
+  def getActorPath(self, idx): #{
+    path = str(self.table.item(idx, self.tableDict['Path']).text())
+
+  def createMovie(self): #{
+    self.movie.show()
+  #}
+
+  def movieStop(self): #{
+    self.movie.setStateStop()
+  #}
+
+  def animationLoop(self, object, event): #{
+    self.ren.Render()
+    self.saveMovieFrame()
+    if self.movie.stateIsStop(): #{
+      self.ren.getIRen().DestroyTimer(self.animation)
+    #}
+  #}
+
+  def movieStart(self): #{
+    img = vtk.vtkWindowToImageFilter()
+    if self.movie.stateIsStop(): #{
+      self.movie.setStateRun()
+      cam = self.ren.getRen().GetActiveCamera()
+      rot = self.movie.getDegPerStep()
+      axis = self.movie.getAxis()
+      nSteps = self.movie.getNumStep()
+      if nSteps > 0: #{
+        for step in range(0, nSteps): #{
+          if axis == 'X': #{
+            cam.Elevation(rot)
+          elif axis == 'Y': #}{
+            cam.Azimuth(rot)
+          else: # axis == 'Z' #}{
+            cam.Roll(rot)
+          #}
+          cam.OrthogonalizeViewUp()
+          self.ren.Render()
+          self.saveMovieFrame()
+          if self.movie.stateIsStop(): #{
+            break
+          #}
+        #}
+        if not self.movie.stateIsStop(): #{
+          self.movie.setStateStop()
+        #}
+      #}
+      else: #{
+        iren = self.ren.getIRen()
+        self.animation = iren.CreateRepeatingTimer(100)
+        iren.AddObserver('TimerEvent', self.animationLoop, 0.0)
+        self.movie.setStateRun()
+    else: #}{
+      QtGui.QMessageBox.critical(self,
+                   'Warning',
+                   'Movie creation already active.',
+                   QtGui.QMessageBox.Close)
+      #}
+    #}
+      
+  def saveMovieFrame(self): #{
+    idx = self.movie.getFileIndex()
+    base_path = self.movie.getFilename()
+    base_dir = os.path.dirname(base_path)
+    split_base_file = os.path.splitext(os.path.basename(base_path))
+    path = base_dir + '/' + split_base_file[0] + '_' + '{:08}'.format(idx) + \
+           split_base_file[1]
+    self.ren.writeFrameToFile(path)
+    self.movie.incFileIndex()
+  #}
+
+  def setBackground(self): #{
+    q_col = QtGui.QColorDialog.getColor()
+    if q_col.isValid(): #{
+      v_col = [q_col.red() / 255.0, q_col.green() / 255.0, q_col.blue() / 255.0]
+      self.ren.getRen().SetBackground(v_col)
+    #}
+  #}
+
+  def showTable(self): #{
+    if self.actors.isVisible(): #{
+      self.actors.hide()
+    else: #}{
+      self.actors.show()
+    #}
+  #}
+
+  def resetView(self): #{
+    self.ren.getRen().ResetCamera()
+  #}
+
+  def setActorColor(self, idx, q_col): #{
+    actor = self.actors.getActor(idx)
+    v_col = [q_col.red() / 255.0, q_col.green() / 255.0, q_col.blue() / 255.0]
+    actor.GetProperty().SetDiffuseColor(v_col)
+    self.actors.setActorColor(idx, q_col)
+    self.ren.Render()
+  #}
+
+  def setActorOpacity(self, idx, op): #{
+    actor = self.actors.getActor(idx)
+    actor.GetProperty().SetOpacity(op)
+    self.actors.setActorOpacity(idx, op)
+    self.ren.Render()
+  #}
+
+def main(): #{
+  app = QtGui.QApplication(sys.argv)
+  parser = argparse.ArgumentParser(
+      description='Interactive display of surfaces.',
+      epilog='Supported surface formats are: ' +
+             str(MAVTKSurfViewer.file_formats) + '.\n')
+  parser.add_argument('-v', '--version',
+      action='store_true', default=False, \
+      help='Show version and exit.')
+  parser.add_argument('file', nargs='*')
+  args = parser.parse_args()
+  if(args.version): #{
+    print(MAVTKSurfViewer.version)
+    sys.exit(0)
+  #}
+  sv = MAVTKSurfViewer(args.file)
+  sys.exit(app.exec_())
+#}
+
+
+if __name__ == '__main__': #{
+  main()
+#}
+

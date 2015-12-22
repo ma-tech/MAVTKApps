@@ -1,0 +1,660 @@
+#!/usr/bin/wish
+#ident "University of Edinburgh $Id$"
+########################################################################
+# \file         MAVTKSurfViewer
+# \author       Bill Hill
+# \date         September 2003
+# \version      $Id$
+# \par
+# Address:
+#               MRC Human Genetics Unit,
+#               MRC Institute of Genetics and Molecular Medicine,
+#               University of Edinburgh,
+#               Western General Hospital,
+#               Edinburgh, EH4 2XU, UK.
+# \par
+# Copyright (C), [2014],
+# The University Court of the University of Edinburgh,
+# Old College, Edinburgh, UK.
+# 
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; either version 2
+# of the License, or (at your option) any later version.
+#
+# This program is distributed in the hope that it will be
+# useful but WITHOUT ANY WARRANTY; without even the implied
+# warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR
+# PURPOSE.  See the GNU General Public License for more
+# details.
+#
+# You should have received a copy of the GNU General Public
+# License along with this program; if not, write to the Free
+# Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+# Boston, MA  02110-1301, USA.
+# \brief	Displays a list of VTK surfaces given on the command line
+#		in a single window.
+# \ingroup	MAVTKApps
+########################################################################
+package require vtk
+package require vtkinteraction
+
+source /opt/vis/share/VTK/colors.tcl
+
+proc showUsage {} {
+  global argv0
+  puts stderr "Usage: $argv0 file0.vtk \[file1.vtk ...\]"
+  puts stderr "A multi surface VTK file viewer for VTK polydata surfaces."
+  puts stderr "Keys:"
+  puts stderr "  3 - 3D stereo rendering (if possible)"
+  puts stderr "  h - prints this usage information"
+  puts stderr "  j - joystick camera movement control using mouse"
+  puts stderr "  m - measurement mode (parallel projection and distance widget)"
+  puts stderr "  n - non-measurement mode"
+  puts stderr "  o - output screen shout to the file MAVTKSurfViewer.ppm"
+  puts stderr "  p - pick point under mouse and print coordinates"
+  puts stderr "  q - quit"
+  puts stderr "  s - solid representation"
+  puts stderr "  t - trackball camera movement control using mouse"
+  puts stderr "  w - wireframe representation"
+  puts stderr ""
+}
+
+# Parse the command line
+set usage 0
+set argIdx 0
+set argsDone 0
+set argsCount [llength $argv]
+if {$argc == 0} {
+  set usage 1
+} else {
+  while {($argIdx < $argsCount) && ($argsDone == 0) && ($usage == 0)} {
+    set option [lindex $argv $argIdx]
+    if { [string index $option 0] != "-" } {
+      set argsDone 1
+    } else {
+      set argsDone 0
+      if { [string length $option] == 2 } {
+	set optVal [lindex $argv [expr $argIdx + 1]]
+	set optSpace 1
+      } else {
+	set optVal [string range $option 2 end]
+	set optSpace 0
+      }
+      set option [string index $option 1]
+      switch -glob -- $option {
+	h       { set usage 1 }
+	default { set usage 1 }
+      }
+      incr argIdx
+    }
+  }
+}
+
+if { $usage != 0 } {
+  showUsage
+  exit
+}
+
+# Set Colours
+set defColCnt 8
+set defColTab(0) $cold_grey
+set defColTab(1) $coral
+set defColTab(2) $cobalt
+set defColTab(3) $mint
+set defColTab(4) $carrot
+set defColTab(5) $turquoise
+set defColTab(6) $plum
+set defColTab(7) $gold
+
+set CUR_COL_NONE 0
+set CUR_COL_ACTOR 1
+set CUR_COL_BACKGROUND 2
+
+# Set actor properties view
+set actorIdx 0
+set actorCnt [llength $argv]
+set curOp 1.0
+set curColDst $CUR_COL_NONE
+set curRot RotateY
+set fixedRot RotateX
+set curFrames 30
+set curDegrees 0
+for {set idx 0} {$idx < $actorCnt} {incr idx} {
+  set actorColTab($idx) $defColTab([expr $idx % $defColCnt])
+  set actorOpTab($idx) $curOp
+}
+set curCol $actorColTab($actorIdx)
+
+for {set idx 0} {$idx < $actorCnt} {incr idx} {
+  set fileName($idx) [lindex $argv $idx]
+}
+
+# Create main window and menus
+wm withdraw .
+toplevel .top
+wm title .top "MAVTKSurfViewer"
+menu .top.menu -type menubar
+frame .top.f0
+pack .top.menu .top.f0 -side top -anchor nw -padx 3 -pady 3 -fill both -expand 1
+menu .top.menu.file -tearoff 0
+menu .top.menu.options -title "Options"
+menu .top.menu.actors -title "Actors"
+menu .top.menu.help -tearoff 0
+.top.menu add cascade -menu .top.menu.file -label "File"
+.top.menu add cascade -menu .top.menu.options -label "Options"
+.top.menu add cascade -menu .top.menu.actors -label "Actors"
+.top.menu add cascade -menu .top.menu.help -label "Help"
+.top.menu.file add command -label "Save Image" -command {SaveImage}
+.top.menu.file add command -label "Save Movie Images" -command {SetMovie}
+.top.menu.file add command -label "Exit" -command {exit}
+.top.menu.help add command -label "About" -command HelpAbout
+.top.menu.help add command -label "Controls" -command HelpControls
+.top.menu.options add command -label "Set Background" -command {SetBackground}
+.top.menu.options add command -label "Fixed Rotation" -command {FixedRotation}
+.top.menu.actors add command -label "Set Properties" -command {ActorProp}
+. configure -menu .top.menu
+vtkRenderWindow renWin
+  renWin StereoCapableWindowOn
+  renWin SetStereoType 1
+vtkTextMapper txtMapper
+  set tProp [txtMapper GetTextProperty]
+  $tProp SetFontFamilyToCourier
+  $tProp SetFontSize 16
+  $tProp ShadowOn
+  $tProp SetColor 1 0 0
+vtkActor2D txtActor
+  txtActor VisibilityOff
+  txtActor SetMapper txtMapper
+vtkCellPicker picker
+  picker AddObserver EndPickEvent showPick
+vtkTkRenderWidget .top.f0.rw -width 512 -height 512 -rw renWin
+::vtk::bind_tk_render_widget .top.f0.rw
+pack .top.menu  -padx 3 -pady 3 -side top -fill x -expand f
+pack .top.f0.rw -padx 3 -pady 3 -side top -fill both -expand t
+
+# Help About
+proc HelpAbout {} {
+  if { [info commands .helpA] != ".helpA" } {
+    toplevel .helpA
+    wm title .helpA "About"
+
+    frame .helpA.f1
+    label .helpA.f1.l0 -padx 3 -pady 3 -text \
+    "
+  A simple surface viewer for VTK polydata.
+  Bill Hill (bill@hgu.mrc.ac.uk)
+
+  Copyright:
+  2004 Medical Research Council, UK."
+    pack .helpA.f1.l0 -expand t -fill both
+    pack .helpA.f1
+  } else {
+    raise .helpA
+  }
+}
+
+# Help Controls
+proc HelpControls {} {
+  if { [info commands .helpC] != ".helpC" } {
+    toplevel .helpC
+    wm title .helpC "Controls"
+
+    frame .helpC.f1
+    label .helpC.f1.l0 -padx 3 -pady 3 -text \
+    "
+  Camera Controls (Key 'c' selects camera)
+  Key 'j'       - joystick
+  Key 't'       - trackball
+  Button 1      - rotate
+  Button 2      - pan
+  Button 3      - zoom
+  ctrl-Button 1 - spin
+
+  Actor Controls (Key 'a' selects actor)
+  Key 'j'       - joystick
+  Key 't'       - trackball
+  Button 1      - rotate
+  Button 2      - pan
+  Button 3      - scale
+  ctrl-Button 1 - spin
+  ctrl-Button 2 - dolly"
+    pack .helpC.f1.l0 -expand t -fill both
+    pack .helpC.f1
+  } else {
+    raise .helpC
+  }
+}
+
+# Actor Controls
+toplevel .actorP
+wm title .actorP "Actor Properties"
+wm protocol .actorP WM_DELETE_WINDOW {wm withdraw .actorP}
+frame .actorP.f0
+frame .actorP.f0.f1
+label .actorP.f0.f1.label0 -highlightthickness 0 -text "Actor"
+scrollbar .actorP.f0.f1.scroll -orient vertical \
+	  -command ".actorP.f0.f1.list yview"
+listbox .actorP.f0.f1.list -yscroll ".actorP.f0.f1.scroll set"
+bind .actorP.f0.f1.list <Double-Button-1> \
+     {ActorSet [.actorP.f0.f1.list get active]}
+label .actorP.f0.f1.label1 -highlightthickness 0 -text "Current actor"
+grid config .actorP.f0.f1.label0 -row 0 -column 0 -columnspan 2
+grid config .actorP.f0.f1.list -row 1 -column 0 -sticky news
+grid config .actorP.f0.f1.scroll -row 1 -column 1 -sticky news
+grid config .actorP.f0.f1.label1 -row 2 -column 0 -columnspan 2
+pack .actorP.f0.f1 -expand 1 -fill both
+frame .actorP.f0.f2
+button .actorP.f0.f2.button0 -text "Colour" -command ActorPColour
+button .actorP.f0.f2.button1 -text "Opacity" -command ActorPOpacity
+button .actorP.f0.f2.button2 -text "Cancel" -command ActorPCancel
+grid config .actorP.f0.f2.button0 -row 0 -column 0 -sticky news
+grid config .actorP.f0.f2.button1 -row 0 -column 1 -sticky news
+grid config .actorP.f0.f2.button2 -row 0 -column 2 -sticky news
+pack .actorP.f0.f2 -expand 1 -fill both
+#grid config .actorP.f0.f1 -row 0 -column 0 -sticky news
+#grid config .actorP.f0.f2 -row 1 -column 0 -sticky news
+pack .actorP.f0 -expand 1 -fill both
+for {set idx 0} {$idx < $actorCnt} {incr idx} {
+  .actorP.f0.f1.list insert $idx [format "% 4d %s" $idx $fileName($idx)]
+}
+
+proc ActorProp {} {
+  wm deiconify .actorP
+}
+
+proc ActorPCancel {} {
+  wm withdraw .actorP
+}
+
+proc ActorSet {actorStr} {
+  global actorIdx  actorColTab actorOpTab
+  scan $actorStr "%d" actorIdx
+  .actorP.f0.f1.label1 config -text [format "Current actor %d" $actorIdx] 
+  scan $actorColTab($actorIdx) "%f %f %f" r g b
+  .colour.f1.l.r set [expr $r * 255.0]
+  .colour.f1.l.g set [expr $g * 255.0]
+  .colour.f1.l.b set [expr $b * 255.0]
+  .opacity.scale set $actorOpTab($actorIdx)
+}
+
+proc ActorPColour {} {
+  global actorIdx actorColTab curCol curColDst CUR_COL_NONE CUR_COL_ACTOR
+  if { $curColDst == $CUR_COL_NONE } {
+    set curCol $actorColTab($actorIdx)
+    .colour.f1.l.r set [expr [lindex $curCol 0] * 255.0]
+    .colour.f1.l.g set [expr [lindex $curCol 1] * 255.0]
+    .colour.f1.l.b set [expr [lindex $curCol 2] * 255.0]
+    set curColDst $CUR_COL_ACTOR
+    wm deiconify .colour
+  }
+}
+
+proc ActorPOpacity {} {
+  wm deiconify .opacity
+}
+
+# Save image
+proc SaveImage {} {
+  renWin Render
+  pnmWriter Write
+}
+
+# Save movie
+proc SaveMovie {} {
+  #number of frames and rotation direction come from setMovie dialog
+  global curFrames curRot actorCnt
+  global curRot
+
+  set maxFrames $curFrames
+  set rotation [expr 360/ $maxFrames]
+
+  #puts "$curRot at $rotation degrees"
+
+  for {set x 0} {$x < $maxFrames} {incr x} {
+    if {$curRot == "RotateZ" } {
+      set filename [format img_%03d_000_000.ppm $x]
+    } elseif {$curRot == "RotateY" } {
+      set filename [format img_000_%03d_000.ppm $x]
+    } else {
+      set filename [format img_000_000_%03d.ppm $x]
+    }
+    vtkWindowToImageFilter $filename
+    $filename SetInput renWin
+    pnmWriter SetInput [$filename GetOutput]
+    pnmWriter SetFileName $filename
+    for {set idx 0} {$idx < $actorCnt} {incr idx} {
+      polyActor($idx) $curRot $rotation
+      renWin Render
+    }  
+    pnmWriter Write
+  }
+
+}
+
+#Do fixed rotation 
+proc DoFixedRot {} {
+  global curDegrees fixedRot actorCnt 
+
+  for {set idx 0} {$idx < $actorCnt} {incr idx} {
+      polyActor($idx) $fixedRot $curDegrees
+      renWin Render
+  }  
+}
+
+
+toplevel .opacity
+wm withdraw .opacity
+wm title .opacity "Set Opacity"
+wm protocol .opacity WM_DELETE_WINDOW {wm withdraw .opacity}
+scale .opacity.scale -label "Opacity" -orient horizontal \
+		     -length 200 -from 0 -to 1 -resolution 0.01 \
+		     -command "SetOpacity"
+button .opacity.apply -text Apply -command UpdateActorProp
+button .opacity.cancel -text Cancel -command CancelOpacity
+grid config .opacity.scale -row 0 -column 0 -columnspan 3
+grid config .opacity.cancel -row 1 -column 0
+grid config .opacity.apply -row 1 -column 2 
+
+# Set opacity
+proc SetOpacity {op} {
+  global actorIdx actorOpTab curOp
+  if {$op < 0.0} {
+    set op 0.0
+  } elseif {$op > 1.0} {
+    set op 1.0
+  }
+  set curOp $op
+  set actorOpTab($actorIdx) $curOp
+}
+
+proc UpdateActorProp {} {
+  global actorCnt actorColTab actorOpTab polyActor renWin
+  for {set idx 0} {$idx < $actorCnt} {incr idx} {
+    eval [polyActor($idx) GetProperty] SetOpacity $actorOpTab($idx)
+    eval [polyActor($idx) GetProperty] SetDiffuseColor $actorColTab($idx)
+    .actorP.f0.f1.list itemconfigure $idx -bg [ColorVTKToTK $actorColTab($idx)]
+  }
+  renWin Render
+}
+
+proc CancelOpacity {} {
+  wm withdraw .opacity
+}
+
+# Set Background colour
+
+proc SetBackground {} {
+  global curColDst CUR_COL_NONE CUR_COL_BACKGROUND
+  if { $curColDst == $CUR_COL_NONE } {
+    set curCol [ren GetBackground]
+    .colour.f1.l.r set [expr [lindex $curCol 0] * 255.0]
+    .colour.f1.l.g set [expr [lindex $curCol 1] * 255.0]
+    .colour.f1.l.b set [expr [lindex $curCol 2] * 255.0]
+    set curColDst $CUR_COL_BACKGROUND
+    wm deiconify .colour
+  }
+}
+
+proc CancelColour {} {
+  global curColDst CUR_COL_NONE
+  set curColDst $CUR_COL_NONE
+  wm withdraw .colour
+}
+
+toplevel .colour
+wm withdraw .colour
+wm title .colour "Set Colour"
+wm protocol .colour WM_DELETE_WINDOW {wm withdraw .colour}
+frame .colour.f1
+frame .colour.f1.l  -relief raised -borderwidth 3
+scale .colour.f1.l.r -from 255 -to 0 -orient vertical -background #f00 \
+      -command SetColour
+scale .colour.f1.l.g -from 255 -to 0 -orient vertical -background #0f0 \
+        -command SetColour
+scale .colour.f1.l.b -from 255 -to 0 -orient vertical -background #00f \
+        -command SetColour
+pack .colour.f1.l.r .colour.f1.l.g .colour.f1.l.b -side left -fill both
+frame .colour.f1.m -relief raised -borderwidth 3
+label .colour.f1.m.sample -highlightthickness 0 -text "Colour  "
+pack .colour.f1.m.sample -fill both -expand 1
+frame .colour.f1.r -relief raised -borderwidth 3
+image create photo ColorWheel -file /opt/vis/share/VTK/colorwheel.ppm
+label .colour.f1.r.wheel -image ColorWheel -highlightthickness 0
+bind .colour.f1.r.wheel <Button-1> {
+    scan [ColorWheel get %x %y] "%%f %%f %%f" r g b
+    .colour.f1.l.r set $r
+    .colour.f1.l.g set $g
+    .colour.f1.l.b set $b
+}
+pack .colour.f1.r.wheel -fill both
+pack .colour.f1.l .colour.f1.m .colour.f1.r -side left -expand 1 -fill both
+
+frame .colour.fb
+button .colour.fb.apply -text Apply -command ApplyColour
+button .colour.fb.cancel -text Cancel -command CancelColour
+pack .colour.fb.apply .colour.fb.cancel -side left -expand 1 -fill x
+pack .colour.f1 .colour.fb -side top -fill both -expand 1
+
+proc ApplyColour {} {
+  global actorColTab polyActor actorIdx renWin curCol curColDst \
+         CUR_COL_ACTOR CUR_COL_BACKGROUND
+  if {$curColDst == $CUR_COL_BACKGROUND} {
+    ren SetBackground [expr [.colour.f1.l.r get]/255.0] \
+	    [expr [.colour.f1.l.g get]/255.0] \
+	    [expr [.colour.f1.l.b get]/255.0]
+    renWin Render
+  } elseif {$curColDst == $CUR_COL_ACTOR} {
+    set curCol [format "%f %f %f" [expr [.colour.f1.l.r get]/255.0] \
+				  [expr [.colour.f1.l.g get]/255.0] \
+				  [expr [.colour.f1.l.b get]/255.0]]
+    set actorColTab($actorIdx) $curCol
+    UpdateActorProp
+  }
+}
+
+proc SetColour {value} {
+  global curCol
+  set curCol [format "#%02x%02x%02x" \
+	      [.colour.f1.l.r get] [.colour.f1.l.g get] [.colour.f1.l.b get]]
+  .colour.f1.m.sample config -background $curCol
+}
+
+proc ColorVTKToTK {vtkC} {
+  scan $vtkC "%f %f %f" r g b
+  set tkC [format "#%02x%02x%02x" [expr int($r * 255.0)] \
+  				  [expr int($g * 255.0)] \
+				  [expr int($b * 255.0)]]
+  return $tkC
+}
+
+# set the number of frames and rotation direction for movie image capture
+proc SetMovie {} {
+  toplevel .movie
+  wm title .movie "Set movie properties"
+  wm protocol .movie WM_DELETE_WINDOW {wm withdraw .movie}
+  scale .movie.scale -label "Number of Frames" -orient horizontal \
+		     -length 200 -from 0 -to 360 -resolution 5 \
+		     -command "SetNumFrames"
+  .movie.scale set 30		     
+  label .movie.label -text "Rotate around axis"
+  radiobutton .movie.rotx -text X -variable curRot -value RotateX
+  radiobutton .movie.roty -text Y -variable curRot -value RotateY
+  radiobutton .movie.rotz -text Z -variable curRot -value RotateZ
+  button .movie.cancel -text Cancel -command CancelMovie
+  button .movie.apply  -text Apply  -command ApplyMovie
+  grid config .movie.scale -row 0 -column 0 -columnspan 3
+  grid config .movie.label -row 1 -column 1
+  grid config .movie.rotx -row 2 -column 0 
+  grid config .movie.roty -row 2 -column 1 
+  grid config .movie.rotz -row 2 -column 2 
+  grid config .movie.cancel -row 3 -column 0
+  grid config .movie.apply -row 3 -column 2
+}
+
+# set the number of frames and rotation direction for movie image capture
+proc FixedRotation {} {
+  toplevel .fixedrot
+  wm title .fixedrot "Do fixed rotation"
+  #wm protocol .fixedrot WM_DELETE_WINDOW {wm withdraw .fixedrot}
+  scale .fixedrot.scale -label "Rotation (Degrees)" -orient horizontal \
+		     -length 200 -from 0 -to 360 -resolution 1 \
+		     -command "SetFixedRot"
+  .fixedrot.scale set 90		     
+  label .fixedrot.label -text "Rotate around axis"
+  radiobutton .fixedrot.rotx -text X -variable fixedRot -value RotateX
+  radiobutton .fixedrot.roty -text Y -variable fixedRot -value RotateY
+  radiobutton .fixedrot.rotz -text Z -variable fixedRot -value RotateZ
+  button .fixedrot.cancel -text Cancel -command CancelFixedRot
+  button .fixedrot.apply  -text Apply  -command ApplyFixedRot
+  grid config .fixedrot.scale -row 0 -column 0 -columnspan 3
+  grid config .fixedrot.label -row 1 -column 1
+  grid config .fixedrot.rotx -row 2 -column 0 
+  grid config .fixedrot.roty -row 2 -column 1 
+  grid config .fixedrot.rotz -row 2 -column 2 
+  grid config .fixedrot.cancel -row 3 -column 0
+  grid config .fixedrot.apply -row 3 -column 2
+}
+
+proc UpdateRotation {} {
+  global actorCnt actorColTab actorOpTab polyActor renWin
+  for {set idx 0} {$idx < $actorCnt} {incr idx} {
+    eval [polyActor($idx) GetProperty] SetOpacity $actorOpTab($idx)
+    eval [polyActor($idx) GetProperty] SetDiffuseColor $actorColTab($idx)
+    .actorP.f0.f1.list itemconfigure $idx -bg [ColorVTKToTK $actorColTab($idx)]
+  }
+  renWin Render
+}
+
+proc CancelMovie {} {
+  wm withdraw .movie
+}
+
+proc CancelFixedRot {} {
+  wm withdraw .fixedrot
+}
+
+# set the number of movie frames from the slider in SetMovie
+proc SetNumFrames {numFrames} {
+  global curFrames
+  set curFrames $numFrames
+}
+
+# set the number of movie frames from the slider in SetMovie
+proc SetFixedRot {numDegrees} {
+  global curDegrees
+  set curDegrees $numDegrees
+}
+
+#set the movie values and capture the frames with SaveMovie{}
+proc ApplyMovie {} {
+  global curFrames
+  global curRot
+  SaveMovie
+  destroy .movie
+}
+
+#set the movie values and capture the frames with SaveMovie{}
+proc ApplyFixedRot {} {
+  DoFixedRot
+  destroy .fixedrot
+}
+
+vtkRenderWindowInteractor iRen
+vtkRenderer ren
+#
+# Setup the VTK rendering pipeline
+if {$actorCnt >= 1} {
+
+  proc keyPressCB {} {
+    switch [iRen GetKeySym] { 
+      "h" {showUsage}
+      "o" {pnmWriter Write}
+      "m" {setMeasureMode 1}
+      "n" {setMeasureMode 0}
+      default {} 
+    }
+  }
+
+  proc setMeasureMode {mode} {
+    set cam [ren GetActiveCamera]
+    if {$mode == 0} {
+      dist Off
+      ren ResetCamera
+      $cam SetParallelProjection 0
+    } else {
+      dist On
+      ren ResetCamera
+      $cam SetParallelProjection 1
+    }
+    renWin Render
+  }
+
+  renWin AddRenderer ren
+  iRen SetRenderWindow renWin
+  iRen AddObserver KeyPressEvent keyPressCB
+  iRen AddObserver UserEvent {wm deiconify .vtkInteract}
+  iRen AddObserver ExitEvent {exit}
+  vtkDistanceWidget dist
+    dist SetInteractor iRen
+    dist CreateDefaultRepresentation
+    
+  for {set idx 0} {$idx < $actorCnt} {incr idx} {
+    vtkPolyDataReader polyReader($idx)
+      polyReader($idx) SetFileName $fileName($idx)
+    vtkPolyDataMapper polyMapper($idx)
+      polyMapper($idx) SetInput [polyReader($idx) GetOutput]
+    vtkActor polyActor($idx)
+      polyActor($idx) SetMapper polyMapper($idx)
+
+    if { $idx == 0 } {
+      # get bounding box - just use the first object to set an origin
+      set bounds [polyActor(0) GetBounds]
+      # compute offsets
+      set offset(0) [expr ([lindex $bounds 0] + [lindex $bounds 1]) / 2.0]
+      set offset(1) [expr ([lindex $bounds 2] + [lindex $bounds 3]) / 2.0]
+      set offset(2) [expr ([lindex $bounds 4] + [lindex $bounds 5]) / 2.0]
+    }
+
+    #set origin for each object 
+    polyActor($idx) SetOrigin $offset(0) $offset(1) $offset(2)
+
+    ren AddActor polyActor($idx)
+    eval [polyActor($idx) GetProperty] SetDiffuseColor $actorColTab($idx)
+  }
+  UpdateActorProp
+  ren SetBackground 255 255 255
+  renWin SetStereoType 1
+  vtkWindowToImageFilter polyImage
+    polyImage SetInput renWin
+  vtkPNMWriter pnmWriter
+    pnmWriter SetInput [polyImage GetOutput]
+    pnmWriter SetFileName MAVTKSurfViewer.ppm
+  iRen Initialize
+  wm withdraw .
+  tkwait window .
+} else {
+  showUsage
+  exit
+}
+
+###
+
+proc showPick {} {
+  set i [picker GetCellId]
+  if { $i < 0 } {
+    txtActor VisibilityOff
+  } else {
+    set selPt [picker GetSelectionPoint]
+      set x [lindex $selPt 0]
+      set y [lindex $selPt 1]
+      set pickPos [picker GetPickPosition]
+      set xp [lindex $pickPos 0]
+      set yp [lindex $pickPos 1]
+      set zp [lindex $pickPos 2]
+      txtMapper SetInput "($xp, $yp, $zp)"
+      txtActor SetPosition $x $y
+      txtActor VisibilityOn
+      puts [format "pick %d %g %g %g" $i $xp $yp $zp]
+  }
+}
