@@ -36,6 +36,8 @@
 # \ingroup      MAVTKApps
 ###
 
+from __future__ import print_function
+
 import io
 import os
 import sys
@@ -46,8 +48,6 @@ import argparse
 from PyQt4 import Qt, QtCore, QtGui
 import vtk
 from vtk.qt4.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
-
-from __future__ import print_function
 
 class MAVTKRenderer(): #{
 
@@ -664,6 +664,7 @@ class MAVTKSurfViewer(QtGui.QMainWindow): #{
   #}
 
   def addSurf(self, name, v_col, opacity, path): #{
+    reader = None
     file_type = path.split(".")[-1]
     if file_type in self.file_formats: #{
       if file_type == 'obj': #{
