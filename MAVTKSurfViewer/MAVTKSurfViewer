@@ -49,6 +49,14 @@ from PyQt4 import Qt, QtCore, QtGui
 import vtk
 from vtk.qt4.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
 
+class CameraSettings(): #{
+  position = [0.0, 0.0, 0.0]
+  focalPoint = [0.0, 0.0, 0.0]
+  viewUp = [0.0, 0.0, 0.0]
+  viewAngle = 0.0
+  parallelScale = 1.0
+#}
+
 ###
 # \class       MAVTKRenderer
 # \brief       Provides a single QFrame for rendering using VTK with
@@ -88,6 +96,38 @@ class MAVTKRenderer(): #{
   def getRenWin(self): #{
     return self._renWin
   #}
+
+  ###
+  # \function  getView
+  # \brief     Get current camera view.
+  ###
+  def getView(self): #{
+    cam = self._ren.GetActiveCamera()
+    v = CameraSettings()
+    v.position = cam.GetPosition()
+    v.focalPoint = cam.GetFocalPoint()
+    v.viewUp = cam.GetViewUp()
+    v.viewAngle = cam.GetViewAngle()
+    v.parallelScale = cam.GetParallelScale()
+    return v
+
+  #}
+
+  ###
+  # \function  setView
+  # \brief     Set camera view.
+  # \param v                 Given camera view.
+  ###
+  def setView(self, v): #{
+    cam = self._ren.GetActiveCamera()
+    cam.SetPosition(v.position)
+    cam.SetFocalPoint(v.focalPoint)
+    cam.SetViewUp(v.viewUp)
+    cam.SetViewAngle(v.viewAngle)
+    cam.SetParallelScale(v.parallelScale)
+    self.Render()
+  #}
+
 
   def getRen(self): #{
     return self._ren
@@ -175,10 +215,16 @@ class MAVTKActorTable(QtGui.QDialog): #{
 
   def initUI(self): #{
     self.setWindowTitle('Actor Table')
-    tl = QtGui.QHBoxLayout()
-    self.setLayout(tl)
+    self. setMinimumWidth(600)
+    vl = QtGui.QVBoxLayout()
+    self.setLayout(vl)
     self._table = QtGui.QTableWidget(0, 6)
-    tl.addWidget(self._table)
+    vl.addWidget(self._table)
+    but = QtGui.QDialogButtonBox(
+              QtGui.QDialogButtonBox.Cancel,
+              QtCore.Qt.Horizontal, self)
+    but.rejected.connect(self.cancel)
+    vl.addWidget(but)
     self._table.setSizePolicy(QtGui.QSizePolicy.Expanding,
                              QtGui.QSizePolicy.Expanding)
     self._table.verticalHeader().setVisible(False)
@@ -187,6 +233,10 @@ class MAVTKActorTable(QtGui.QDialog): #{
     self._table.cellClicked.connect(self.cellClicked)
     self._table.cellChanged.connect(self.cellChanged)
     self._table.setSelectionBehavior(QtGui.QAbstractItemView.SelectRows)
+  #}
+
+  def cancel(self): #{
+    self.hide()
   #}
 
   def textToFloat(self, txt): #{
@@ -211,16 +261,16 @@ class MAVTKActorTable(QtGui.QDialog): #{
     print('delActor() - not implemented', file=sys.stderr)
   #}
 
-  def addActor(self, actor, name, color, opacity, path): #{
+  def addActor(self, actor, visible, name, color, opacity, path): #{
     idx = len(self._actors)
     self._actors.insert(idx, actor)
     self._table.insertRow(idx)
     self._setActorIndex(idx)
-    self.setActorVisible(idx, True)
     self._setActorName(idx, name)
     self.setActorColor(idx, color)
     self.setActorOpacity(idx, opacity)
     self.setActorPath(idx, path)
+    self.setActorVisible(idx, visible)
   #}
 
   ###
@@ -432,7 +482,7 @@ class ControlsDialog(QtGui.QDialog): #{
     '<tr><td>Ctrl-Button 1</td><td> - spin</td></tr>' + \
     '<tr><td>Ctrl-Button 2</td><td> - dolly</td></tr>' + \
     '</table></p>' + \
-    '<p>Camera mode, trackball mode and solid surfaces are the defaults' + \
+    '<p>Camera mode, trackball mode and solid surfaces are the defaults ' + \
     'used.</p>'
     lo = QtGui.QVBoxLayout(self)
     txt = QtGui.QLabel(msg)
@@ -514,7 +564,7 @@ class MovieCreationDialog(QtGui.QDialog): #{
     lo_ctl.addWidget(lb_file, 1, 0, 1, 2)
     bt_file = QtGui.QPushButton('Browse ...')
     lo_ctl.addWidget(bt_file, 1, 3, 1, 1)
-    self._le_path = QtGui.QLineEdit('... select file ...')
+    self._le_path = QtGui.QLineEdit('no file')
     lo_ctl.addWidget(self._le_path, 2, 0, 1, 4)
     lb_fix = QtGui.QLabel('File index')
     lb_fix.setAlignment(QtCore.Qt.AlignLeft)
@@ -576,7 +626,11 @@ class MovieCreationDialog(QtGui.QDialog): #{
   #}
 
   def getFilename(self): #{
-    return str(self._le_path.text())
+    path = str(self._le_path.text())
+    if path == 'no file': #{
+      path = None
+    #}
+    return path
   #}
 
   def getFileIndex(self): #{
@@ -611,6 +665,7 @@ class MAVTKSurfViewer(QtGui.QMainWindow): #{
   _actor_file_ident = 'MAVTKSurfViewer Actor Settings'
   _file_formats = ['obj', 'stl', 'vtk']
   _animation = 0
+  _home = None
   _movie = None
 
   def __init__(self, files): #{
@@ -682,6 +737,18 @@ class MAVTKSurfViewer(QtGui.QMainWindow): #{
     vShowTable.triggered.connect(self.showTable)
     vMenu.addAction(vShowTable)
     #
+    vGoHome = QtGui.QAction('Go Home', self)
+    vGoHome.setShortcut('Ctrl+H')
+    vGoHome.setStatusTip('Go to home view')
+    vGoHome.triggered.connect(self.goHome)
+    vMenu.addAction(vGoHome)
+    #
+    vSetHome = QtGui.QAction('Set Home', self)
+    vSetHome.setShortcut('Ctrl+H')
+    vSetHome.setStatusTip('Set home view')
+    vSetHome.triggered.connect(self.setHome)
+    vMenu.addAction(vSetHome)
+    #
     vViewAll = QtGui.QAction('View All', self)
     vViewAll.setShortcut('Ctrl+R')
     vViewAll.setStatusTip('View all actors')
@@ -715,7 +782,7 @@ class MAVTKSurfViewer(QtGui.QMainWindow): #{
     # Read files given on command line
     r = 4203829009 # seed for an OK sequence of colors
     for f in files: #{
-      self.addSurf(os.path.basename(f), iCol, self._def_opacity, f)
+      self.addSurf(True, os.path.basename(f), iCol, self._def_opacity, f)
       r = self._getRandomColor(r, iCol)
     #}
     # Add pick observer
@@ -786,12 +853,13 @@ class MAVTKSurfViewer(QtGui.QMainWindow): #{
   ###
   # \function  addSurf
   # \brief     Adds a surface to the viewer.
+  # \param visible             Actor visibility (boolean).
   # \param name                Actor name.
   # \param v_col               Actor colour as a VTK triple float array.
   # \param opacity             Actor opacity as a float with range [0.0-1.0].
   # \param path                Actor file path.
   ### 
-  def addSurf(self, name, v_col, opacity, path): #{
+  def addSurf(self, visible, name, v_col, opacity, path): #{
     reader = None
     file_type = path.split(".")[-1]
     if file_type in self._file_formats: #{
@@ -813,10 +881,11 @@ class MAVTKSurfViewer(QtGui.QMainWindow): #{
     actor.GetProperty().SetDiffuse(0.6);
     actor.GetProperty().SetSpecular(0.2);
     actor.GetProperty().SetSpecularPower(3.0);
+    actor.SetVisibility(int(visible))
     self.ren.getRen().AddActor(actor)
     self.ren.Render()
     q_col = Qt.QColor(255 * v_col[0], 255 * v_col[1], 255 * v_col[2])
-    self._actors.addActor(actor, name, q_col, opacity, path)
+    self._actors.addActor(actor, visible, name, q_col, opacity, path)
   #}
 
   ###
@@ -834,7 +903,8 @@ class MAVTKSurfViewer(QtGui.QMainWindow): #{
                self._current_path, s)
     if(path): #{
       p = str(path)
-      self.addSurf(os.path.basename(p), self._def_color, self._def_opacity, p)
+      self.addSurf(True, os.path.basename(p), self._def_color, 
+                   self._def_opacity, p)
     #}
   #}
 
@@ -873,6 +943,7 @@ class MAVTKSurfViewer(QtGui.QMainWindow): #{
       col = self._actors.getActorColor(idx)
       act_ary.append( \
         { \
+          'visible' : self._actors.getActorVisability(idx), \
           'name': self._actors.getActorName(idx), \
           'color': [col.red(), col.blue(), col.green()], \
           'opacity': self._actors.getActorOpacity(idx), \
@@ -931,14 +1002,31 @@ class MAVTKSurfViewer(QtGui.QMainWindow): #{
         act_ary = data['actors']
         for idx in range(0, n_act): #{
           act = act_ary[idx]
-          name = str(act['name'])
-          col = act['color']
-          v_col = [float(col[0]) / 255.0, \
-                   float(col[1]) / 255.0, \
-                   float(col[2]) / 255.0]
-          opacity = float(act['opacity'])
+          try: #{
+            name = str(act['name'])
+          except: #}{
+            name = str(idx)
+          #}
+          try: #{
+            col = act['color']
+            v_col = [float(col[0]) / 255.0, \
+                     float(col[1]) / 255.0, \
+                     float(col[2]) / 255.0]
+          except: #}{
+            v_col = [1.0, 1.0, 1.0]
+          #}
+          try: #{
+            visible = bool(act['visible'])
+          except: #}{
+            visible = True
+          #}
+          try: #{
+            opacity = float(act['opacity'])
+          except: #}{
+            opacity = 1.0
+          #}
           path = str(act['path'])
-          self.addSurf(name, v_col, opacity, path)
+          self.addSurf(visible, name, v_col, opacity, path)
         #}
       #}
       if not bool(data): #{
@@ -1060,12 +1148,14 @@ class MAVTKSurfViewer(QtGui.QMainWindow): #{
   def saveMovieFrame(self): #{
     idx = self._movie.getFileIndex()
     base_path = self._movie.getFilename()
-    base_dir = os.path.dirname(base_path)
-    split_base_file = os.path.splitext(os.path.basename(base_path))
-    path = base_dir + '/' + split_base_file[0] + '_' + '{:08}'.format(idx) + \
-           split_base_file[1]
-    self.ren.writeFrameToFile(path)
-    self._movie.incFileIndex()
+    if bool(base_path): #{
+      base_dir = os.path.dirname(base_path)
+      split_base_file = os.path.splitext(os.path.basename(base_path))
+      path = base_dir + '/' + split_base_file[0] + \
+             '_' + '{:08}'.format(idx) + split_base_file[1]
+      self.ren.writeFrameToFile(path)
+      self._movie.incFileIndex()
+    #}
   #}
 
   ###
@@ -1089,12 +1179,24 @@ class MAVTKSurfViewer(QtGui.QMainWindow): #{
     #}
   #}
 
+  def goHome(self): #{
+    if bool(self._home): #{
+      self.ren.setView(self._home)
+    #}
+  #}
+
+  def setHome(self): #{
+    self._home = self.ren.getView()
+    print(self._home)
+  #}
+
   ###
   # \function  resetView
   # \brief     Resets the camera to make sure that all actors ar visible.
   ###
   def resetView(self): #{
     self.ren.getRen().ResetCamera()
+    self.ren.Render()
   #}
 
   ###
