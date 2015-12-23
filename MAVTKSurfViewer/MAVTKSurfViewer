@@ -49,6 +49,11 @@ from PyQt4 import Qt, QtCore, QtGui
 import vtk
 from vtk.qt4.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
 
+###
+# \class       MAVTKRenderer
+# \brief       Provides a single QFrame for rendering using VTK with
+#              interaction (default camera trackball) and picker.
+###
 class MAVTKRenderer(): #{
 
   def __init__(self): #{
@@ -56,51 +61,63 @@ class MAVTKRenderer(): #{
   #}
     
   def initUI(self): #{
-    self.frame = QtGui.QFrame()
+    self._frame = QtGui.QFrame()
     vl = QtGui.QVBoxLayout()
-    self.vtkWidget = QVTKRenderWindowInteractor(self.frame)
+    self.vtkWidget = QVTKRenderWindowInteractor(self._frame)
     vl.addWidget(self.vtkWidget)
-    self.frame.setLayout(vl)
+    self._frame.setLayout(vl)
   #}
 
   def init(self): #{
-    self.ren = vtk.vtkRenderer()
-    self.picker = vtk.vtkCellPicker()
-    self.renWin = self.vtkWidget.GetRenderWindow()
-    self.renWin.AddRenderer(self.ren)
-    iren  = self.renWin.GetInteractor()
+    self._ren = vtk.vtkRenderer()
+    self._picker = vtk.vtkCellPicker()
+    self._renWin = self.vtkWidget.GetRenderWindow()
+    self._renWin.AddRenderer(self._ren)
+    iren  = self._renWin.GetInteractor()
     istyle = vtk.vtkInteractorStyleSwitch()
     iren.SetInteractorStyle(istyle)
     istyle.SetCurrentStyleToTrackballCamera()
-    iren.SetPicker(self.picker)
+    iren.SetPicker(self._picker)
     iren.Initialize()
   #}
 
   def getIRen(self): #{
-    return self.renWin.GetInteractor()
+    return self._renWin.GetInteractor()
   #}
 
   def getRenWin(self): #{
-    return self.renWin
+    return self._renWin
   #}
 
   def getRen(self): #{
-    return self.ren
+    return self._ren
   #}
 
   def getPicker(self): #{
-    return self.picker
+    return self._picker
   #}
 
   def getFrame(self): #{
-    return self.frame
+    return self._frame
   #}
 
+  ###
+  # \function  Render
+  # \brief     Forces a render update even if the render window doesn't have
+  #            focus.
+  ###
   def Render(self): #{
-   self.renWin.Render()
+   self._renWin.Render()
    self.vtkWidget.update()
  #}
 
+  ###
+  # \function  writeFrameToFile
+  # \brief     Force a re-rendering and then capture the frame image and
+  #            write it to a file with the given path.
+  # \param path                File path in which the extension is used to
+  #                            determine the image format used.
+  ###
   def writeFrameToFile(self, path): #{
     ok = True
     file_type = path.split(".")[-1]
@@ -116,14 +133,14 @@ class MAVTKRenderer(): #{
       writer = vtk.vtkTIFFWriter()
     #}
     if(writer): #{
-      img.SetInput(self.renWin)
+      img.SetInput(self._renWin)
       writer.SetInputConnection(img.GetOutputPort())
       writer.SetFileName(str(path))
-      self.ren.Render()
+      self._ren.Render()
       writer.Write()
     else: #}{
       ok = False
-      result = QtGui.QMessageBox.critical(self.frame,
+      result = QtGui.QMessageBox.critical(self._frame,
                    'Error',
                    'Unsupported file format (' + str(file_type) + ').',
                    QtGui.QMessageBox.Close)
@@ -132,20 +149,27 @@ class MAVTKRenderer(): #{
   #}
 #}
 
+###
+# \class       MAVTKActorTable
+# \brief       Inherits from QDialog and contains a QTableWidget which is
+#              used to display and interact with actor properties.
+###
 class MAVTKActorTable(QtGui.QDialog): #{
 
   colorChangeSignal = QtCore.pyqtSignal(int, Qt.QColor)
   opacityChangeSignal = QtCore.pyqtSignal(int, float)
+  visableChangeSignal = QtCore.pyqtSignal(int, bool)
 
   def __init__(self): #{
     super(MAVTKActorTable, self).__init__()
-    self.tableDict = {'Index'   : 0,
-                      'Name'    : 1,
-                      'Color'   : 2,
-                      'Opacity' : 3,
-                      'Path'    : 4}
-    self.tableKeys = ['Index', 'Name', 'Color', 'Opacity', 'Path']
-    self.actors = []
+    self._tableDict = {'Index'   : 0,
+                       'Visible' : 1,
+                       'Name'    : 2,
+                       'Color'   : 3,
+                       'Opacity' : 4,
+                       'Path'    : 5}
+    self._tableKeys = ['Index', 'Visible', 'Name', 'Color', 'Opacity', 'Path']
+    self._actors = []
     self.initUI()
   #}
 
@@ -153,16 +177,16 @@ class MAVTKActorTable(QtGui.QDialog): #{
     self.setWindowTitle('Actor Table')
     tl = QtGui.QHBoxLayout()
     self.setLayout(tl)
-    self.table = QtGui.QTableWidget(0, 5)
-    tl.addWidget(self.table)
-    self.table.setSizePolicy(QtGui.QSizePolicy.Expanding,
+    self._table = QtGui.QTableWidget(0, 6)
+    tl.addWidget(self._table)
+    self._table.setSizePolicy(QtGui.QSizePolicy.Expanding,
                              QtGui.QSizePolicy.Expanding)
-    self.table.verticalHeader().setVisible(False)
-    self.table.horizontalHeader().setStretchLastSection(True)
-    self.table.setHorizontalHeaderLabels(self.tableKeys)
-    self.table.cellClicked.connect(self.cellClicked)
-    self.table.cellChanged.connect(self.cellChanged)
-    self.table.setSelectionBehavior(QtGui.QAbstractItemView.SelectRows)
+    self._table.verticalHeader().setVisible(False)
+    self._table.horizontalHeader().setStretchLastSection(True)
+    self._table.setHorizontalHeaderLabels(self._tableKeys)
+    self._table.cellClicked.connect(self.cellClicked)
+    self._table.cellChanged.connect(self.cellChanged)
+    self._table.setSelectionBehavior(QtGui.QAbstractItemView.SelectRows)
   #}
 
   def textToFloat(self, txt): #{
@@ -178,46 +202,84 @@ class MAVTKActorTable(QtGui.QDialog): #{
     return val
   #}
 
+  ###
+  # \function  delActor
+  # \brief     Not implemented. There is currently no actor deletion,
+  #            this allows simple index based actor selection
+  ###
   def delActor(self, idx): #{
-    # TODO allow actor deletion
-    # Currently actors are not deleted and simple table index allows
-    # actor selection
     print('delActor() - not implemented', file=sys.stderr)
   #}
 
   def addActor(self, actor, name, color, opacity, path): #{
-    idx = len(self.actors)
-    self.actors.insert(idx, actor)
-    self.table.insertRow(idx)
-    self.setActorIndex(idx)
-    self.setActorName(idx, name)
+    idx = len(self._actors)
+    self._actors.insert(idx, actor)
+    self._table.insertRow(idx)
+    self._setActorIndex(idx)
+    self.setActorVisible(idx, True)
+    self._setActorName(idx, name)
     self.setActorColor(idx, color)
     self.setActorOpacity(idx, opacity)
     self.setActorPath(idx, path)
   #}
 
-  def setActorIndex(self, idx): #{
+  ###
+  # \function  _setActorIndex
+  # \brief     Sets the index in the table.
+  # \param idx                 Given index.
+  ###
+  def _setActorIndex(self, idx): #{
     itm = QtGui.QTableWidgetItem(str(idx))
     itm.setFlags(itm.flags() & (~QtCore.Qt.ItemIsEditable))
-    self.table.setItem(idx, self.tableDict['Index'], itm)
+    self._table.setItem(idx, self._tableDict['Index'], itm)
   #}
 
-  def setActorName(self, idx, name): #{
+  ###
+  # \function  setActorVisible
+  # \brief     Sets actor visability in the table.
+  # \param idx                 Given index.
+  # \param state               actor visability (boolean).
+  ###
+  def setActorVisible(self, idx, state): #{
+    itm = QtGui.QTableWidgetItem(str(state))
+    itm.setFlags(itm.flags() & (~QtCore.Qt.ItemIsEditable))
+    self._table.setItem(idx, self._tableDict['Visible'], itm)
+  #}
+
+  ###
+  # \function  _setActorName
+  # \brief     Sets the actor name for the given index in the table.
+  # \param idx                 Given index.
+  # \param name                Given actor name to set.
+  ###
+  def _setActorName(self, idx, name): #{
     itm = QtGui.QTableWidgetItem(name)
-    self.table.setItem(idx, self.tableDict['Name'], itm)
+    self._table.setItem(idx, self._tableDict['Name'], itm)
   #}
 
+  ###
+  # \function  setActorColor
+  # \brief     Sets the actor colour for the given index in the table.
+  # \param idx                 Given index.
+  # \param name                Given actor colour as a QColor.
+  ###
   def setActorColor(self, idx, color): #{
     itm = QtGui.QTableWidgetItem()
     itm.setBackgroundColor(color)
     itm.setFlags(itm.flags() & (~QtCore.Qt.ItemIsEditable))
-    self.table.setItem(idx, self.tableDict['Color'], itm)
+    self._table.setItem(idx, self._tableDict['Color'], itm)
   #}
 
+  ##
+  # \function  
+  # \brief     Sets the actor opacity for the given index in the table.
+  # \param idx                 Given index.
+  # \param opacity             Given actor opacity.
+  ###
   def setActorOpacity(self, idx, opacity): #{
-    setval = not bool(self.table.item(idx, self.tableDict['Opacity']))
+    setval = not bool(self._table.item(idx, self._tableDict['Opacity']))
     if(not setval): #{
-      txt = self.table.item(idx, self.tableDict['Opacity']).text()
+      txt = self._table.item(idx, self._tableDict['Opacity']).text()
       val = self.textToFloat(txt)
       if(math.fabs(val - opacity) >= 0.0001): #{
         opacity = val
@@ -226,48 +288,67 @@ class MAVTKActorTable(QtGui.QDialog): #{
     #}
     if(setval): #{
       itm = QtGui.QTableWidgetItem(str(opacity))
-      self.table.setCellWidget(idx, self.tableDict['Opacity'], None)
-      self.table.setItem(idx, self.tableDict['Opacity'], itm)
+      self._table.setCellWidget(idx, self._tableDict['Opacity'], None)
+      self._table.setItem(idx, self._tableDict['Opacity'], itm)
     #}
   #}
 
+  ##
+  # \function  
+  # \brief     Sets the actor file path for the given index in the table.
+  # \param idx                 Given index.
+  # \param path                Given actor file path.
+  ###
   def setActorPath(self, idx, path): #{
     itm = QtGui.QTableWidgetItem(path)
     itm.setFlags(itm.flags() & (~QtCore.Qt.ItemIsEditable))
-    self.table.setItem(idx, self.tableDict['Path'], itm)
+    self._table.setItem(idx, self._tableDict['Path'], itm)
+  #}
+
+  def selectActor(self, idx): #{
+    self._table.selectRow(idx)
   #}
 
   def getNumActors(self): #{
-    return self.table.rowCount()
+    return self._table.rowCount()
   #}
 
   def getActor(self, idx): #{
-    actor = self.actors[idx]
+    actor = self._actors[idx]
     return actor
   #}
 
+  def getActorVisability(self, idx): #{
+    vis = 'True' == \
+          str(self._table.item(idx, self._tableDict['Visible']).text())
+    return vis
+  #}
+
   def getActorName(self, idx): #{
-    name = str(self.table.item(idx, self.tableDict['Name']).text())
+    name = str(self._table.item(idx, self._tableDict['Name']).text())
     return name
   #}
 
   def getActorColor(self, idx): #{
-    q_col = self.table.item(idx, self.tableDict['Color']).backgroundColor()
+    q_col = self._table.item(idx, self._tableDict['Color']).backgroundColor()
     return q_col
   #}
 
   def getActorOpacity(self, idx): #{
-    opacity = float(self.table.item(idx, self.tableDict['Opacity']).text())
+    opacity = float(self._table.item(idx, self._tableDict['Opacity']).text())
     return opacity
   #}
 
   def getActorPath(self, idx): #{
-    path = str(self.table.item(idx, self.tableDict['Path']).text())
+    path = str(self._table.item(idx, self._tableDict['Path']).text())
     return path
   #}
 
   def cellClicked(self, idx, prop): #{
-    if prop == self.tableDict['Color']: #{
+    if prop == self._tableDict['Visible']: #{
+      vis = not self.getActorVisability(idx)     
+      self.visableChangeSignal.emit(idx, vis)
+    elif prop == self._tableDict['Color']: #}{
       col = QtGui.QColorDialog.getColor()
       if col.isValid(): #{
         self.colorChangeSignal.emit(idx, col)
@@ -276,8 +357,8 @@ class MAVTKActorTable(QtGui.QDialog): #{
   #}
 
   def cellChanged(self, idx, prop): #{
-    if prop == self.tableDict['Opacity']: #{
-      txt = self.table.item(idx, prop).text()
+    if prop == self._tableDict['Opacity']: #{
+      txt = self._table.item(idx, prop).text()
       val = self.textToFloat(txt)
       self.opacityChangeSignal.emit(idx, val)
     #}
@@ -285,15 +366,21 @@ class MAVTKActorTable(QtGui.QDialog): #{
 #}
 
 
+###
+# \class       AboutDialog
+# \brief       A dialog descended from QDialog which shows basic information
+#              about the application.
+###
 class AboutDialog(QtGui.QDialog): #{
 
-  def __init__(self, parent = None): #{
+  def __init__(self, version, parent = None): #{
     super(AboutDialog, self).__init__(parent)
-    self.initUI()
+    self.initUI(version)
   #}
 
-  def initUI(self): #{
+  def initUI(self, version): #{
     msg = '<b>MAVTKSurfViewer</b>' + \
+          '<p>Version ' + version + '.</p>' + \
           '<p>A VTK based multiple surface viewer.</p>' + \
           '<p>ma-tech@igmm.ed.ac.uk</p>'
     lo = QtGui.QVBoxLayout(self)
@@ -309,7 +396,13 @@ class AboutDialog(QtGui.QDialog): #{
   def cancel(self): #{
     self.hide()
   #}
+#}
     
+###
+# \class       ControlsDialog
+# \brief       A dialog descended from QDialog which shows basic controls
+#              of the render window.
+###
 class ControlsDialog(QtGui.QDialog): #{
 
   def __init__(self, parent = None): #{
@@ -357,18 +450,22 @@ class ControlsDialog(QtGui.QDialog): #{
 #}
     
 
+###
+# \class       MovieCreationState
+# \brief       Class used for an enum with movie creation states.
+###
 class MovieCreationState(object): #{
   stop  = 0
   run   = 1
 #}
 
 class MovieCreationDialog(QtGui.QDialog): #{
-  current_path = ''
+  _current_path = ''
 
   def __init__(self, parent = None): #{
     super(MovieCreationDialog, self).__init__(parent)
     self.initUI()
-    self.state = MovieCreationState.stop
+    self._state = MovieCreationState.stop
   #}
 
   def initUI(self): #{
@@ -392,23 +489,23 @@ class MovieCreationDialog(QtGui.QDialog): #{
     lb_nos = QtGui.QLabel('Number of Steps')
     lb_nos.setAlignment(QtCore.Qt.AlignLeft)
     lo_fxr.addWidget(lb_nos, 1, 0, 1, 2)
-    self.sp_nos = QtGui.QSpinBox()
-    self.sp_nos.setRange(0, 99999999)
-    self.sp_nos.setValue(0)
-    lo_fxr.addWidget(self.sp_nos, 1, 3, 1, 1)
+    self._sp_nos = QtGui.QSpinBox()
+    self._sp_nos.setRange(0, 99999999)
+    self._sp_nos.setValue(0)
+    lo_fxr.addWidget(self._sp_nos, 1, 3, 1, 1)
     lb_dps = QtGui.QLabel('Degrees per Step')
     lb_dps.setAlignment(QtCore.Qt.AlignLeft)
     lo_fxr.addWidget(lb_dps, 2, 0, 1, 2)
-    self.sp_dps = QtGui.QSpinBox()
-    self.sp_dps.setRange(-359, 359)
-    self.sp_dps.setValue(0)
-    lo_fxr.addWidget(self.sp_dps, 2, 3, 1, 1)
+    self._sp_dps = QtGui.QSpinBox()
+    self._sp_dps.setRange(-359, 359)
+    self._sp_dps.setValue(0)
+    lo_fxr.addWidget(self._sp_dps, 2, 3, 1, 1)
     lb_axis = QtGui.QLabel('Axis')
     lb_axis.setAlignment(QtCore.Qt.AlignLeft)
     lo_fxr.addWidget(lb_axis, 3, 0, 1, 2)
-    self.cb_axis = QtGui.QComboBox()
-    self.cb_axis.addItems(['X', 'Y', 'Z'])
-    lo_fxr.addWidget(self.cb_axis, 3, 2, 1, 2)
+    self._cb_axis = QtGui.QComboBox()
+    self._cb_axis.addItems(['X', 'Y', 'Z'])
+    lo_fxr.addWidget(self._cb_axis, 3, 2, 1, 2)
     lb_ctl = QtGui.QLabel('Movie Controls')
     lb_ctl.setAlignment(QtCore.Qt.AlignCenter)
     lo_ctl.addWidget(lb_ctl, 0, 0, 1, 4)
@@ -417,19 +514,19 @@ class MovieCreationDialog(QtGui.QDialog): #{
     lo_ctl.addWidget(lb_file, 1, 0, 1, 2)
     bt_file = QtGui.QPushButton('Browse ...')
     lo_ctl.addWidget(bt_file, 1, 3, 1, 1)
-    self.le_path = QtGui.QLineEdit('... select file ...')
-    lo_ctl.addWidget(self.le_path, 2, 0, 1, 4)
+    self._le_path = QtGui.QLineEdit('... select file ...')
+    lo_ctl.addWidget(self._le_path, 2, 0, 1, 4)
     lb_fix = QtGui.QLabel('File index')
     lb_fix.setAlignment(QtCore.Qt.AlignLeft)
     lo_ctl.addWidget(lb_fix, 3, 0, 1, 2)
-    self.sp_fix = QtGui.QSpinBox()
-    self.sp_fix.setRange(0, 99999999)
-    self.sp_fix.setValue(0)
-    lo_ctl.addWidget(self.sp_fix, 3, 2, 1, 2)
-    self.bt_start = QtGui.QPushButton('Start')
-    lo_ctl.addWidget(self.bt_start, 4, 0, 1, 2)
-    self.bt_stop = QtGui.QPushButton('Stop')
-    lo_ctl.addWidget(self.bt_stop, 4, 2, 1, 2)
+    self._sp_fix = QtGui.QSpinBox()
+    self._sp_fix.setRange(0, 99999999)
+    self._sp_fix.setValue(0)
+    lo_ctl.addWidget(self._sp_fix, 3, 2, 1, 2)
+    self._bt_start = QtGui.QPushButton('Start')
+    lo_ctl.addWidget(self._bt_start, 4, 0, 1, 2)
+    self._bt_stop = QtGui.QPushButton('Stop')
+    lo_ctl.addWidget(self._bt_stop, 4, 2, 1, 2)
     bt_file.clicked.connect(self.selectFile)
     buttons.rejected.connect(self.cancel)
   #}
@@ -439,76 +536,86 @@ class MovieCreationDialog(QtGui.QDialog): #{
   #}
 
   def setStateRun(self): #{
-    self.state = MovieCreationState.run
+    self._state = MovieCreationState.run
   #}
 
   def setStateStop(self): #{
-    self.state = MovieCreationState.stop
+    self._state = MovieCreationState.stop
   #}
 
+  ###
+  # \function  stateIsStop
+  # \brief     Checks the value of the movie creation state flag, but before
+  #            doing this makes sure that any Qt events have been processed.
+  ###
   def stateIsStop(self): #{
     QtGui.QApplication.processEvents()
-    return self.state == MovieCreationState.stop
+    return self._state == MovieCreationState.stop
   #}
 
   def selectFile(self): #{
     path = QtGui.QFileDialog.getOpenFileName(self, 'Select base movie file',
-               self.current_path,
+               self._current_path,
                'Image files (*.bmp *.png *.pnm *.tif *.tiff);;' +
                'All files (*)')
     if(path): #{
-      self.le_path.setText(path)
+      self._le_path.setText(path)
     #}
   #}
   
   def getNumStep(self): #{
-    return self.sp_nos.value()
+    return self._sp_nos.value()
   #}
 
   def getDegPerStep(self): #{
-    return self.sp_dps.value()
+    return self._sp_dps.value()
   #}
 
   def getAxis(self): #{
-    return str(self.cb_axis.currentText())
+    return str(self._cb_axis.currentText())
   #}
 
   def getFilename(self): #{
-    return str(self.le_path.text())
+    return str(self._le_path.text())
   #}
 
   def getFileIndex(self): #{
-    return self.sp_fix.value()
+    return self._sp_fix.value()
   #}
 
   def setFileIndex(self, value): #{
-    self.sp_fix.setValue(value)
+    self._sp_fix.setValue(value)
   #}
 
   def incFileIndex(self): #{
-    self.sp_fix.setValue(self.sp_fix.value() + 1)
+    self._sp_fix.setValue(self._sp_fix.value() + 1)
   #}
 
   def getStartPB(self): #{
-    return self.bt_start
+    return self._bt_start
   #}
 
   def getStopPB(self): #{
-    return self.bt_stop
+    return self._bt_stop
   #}
 #}
 
 
+###
+# \class       MAVTKSurfViewer
+# \brief       Main window of the application descended from QMainWindow.
+#              This has a menu bar, render window and status bar.
+###
 class MAVTKSurfViewer(QtGui.QMainWindow): #{
-  version = '0.0.1'
-  actor_file_ident = 'MAVTKSurfViewer Actor Settings'
-  file_formats = ['obj', 'stl', 'vtk']
-  animation = 0
-  movie = None
+  _version = '0.0.1'
+  _actor_file_ident = 'MAVTKSurfViewer Actor Settings'
+  _file_formats = ['obj', 'stl', 'vtk']
+  _animation = 0
+  _movie = None
 
   def __init__(self, files): #{
     super(MAVTKSurfViewer, self).__init__()
-    self.current_path = ''
+    self._current_path = ''
     self._def_opacity = 1.0
     self._def_color = [1.0, 1.0, 1.0]
     self.initUI(files)
@@ -517,7 +624,7 @@ class MAVTKSurfViewer(QtGui.QMainWindow): #{
   def initUI(self, files): #{
     iCol = [1.0, 1.0, 1.0]
     ## Actor table
-    self.actors = MAVTKActorTable()
+    self._actors = MAVTKActorTable()
     ### Menubar
     menubar = self.menuBar()
     fMenu = menubar.addMenu('&File')
@@ -554,14 +661,14 @@ class MAVTKSurfViewer(QtGui.QMainWindow): #{
     fExit.triggered.connect(self.quit)
     fMenu.addAction(fExit)
     ##
-    self.movie = MovieCreationDialog()
+    self._movie = MovieCreationDialog()
     aMovie = QtGui.QAction('Create Movie', self)
     aMovie.setShortcut('Ctrl+M')
     aMovie.setStatusTip('Open movie creation dialog')
     aMovie.triggered.connect(self.createMovie)
     aMenu.addAction(aMovie)
-    self.movie.getStartPB().clicked.connect(self.movieStart)
-    self.movie.getStopPB().clicked.connect(self.movieStop)
+    self._movie.getStartPB().clicked.connect(self.movieStart)
+    self._movie.getStopPB().clicked.connect(self.movieStop)
     ##
     vSetBackground = QtGui.QAction('Set Background', self)
     vSetBackground.setShortcut('Ctrl+B')
@@ -587,7 +694,7 @@ class MAVTKSurfViewer(QtGui.QMainWindow): #{
     hControls.triggered.connect(self.showControls)
     hMenu.addAction(hControls)
     #
-    self.about = AboutDialog()
+    self.about = AboutDialog(self._version)
     hAbout = QtGui.QAction(QtGui.QIcon('help.png'), 'About', self)
     hAbout.setStatusTip('About MAVTKSurfViewer')
     hAbout.triggered.connect(self.showAbout)
@@ -597,8 +704,9 @@ class MAVTKSurfViewer(QtGui.QMainWindow): #{
     self.setGeometry(256, 256, 768, 768)
     self.setWindowTitle('MAVTKSurfViewer')
     #
-    self.actors.colorChangeSignal.connect(self.setActorColor)
-    self.actors.opacityChangeSignal.connect(self.setActorOpacity)
+    self._actors.visableChangeSignal.connect(self.setActorVisible)
+    self._actors.colorChangeSignal.connect(self.setActorColor)
+    self._actors.opacityChangeSignal.connect(self.setActorOpacity)
     #
     self.ren = MAVTKRenderer()
     self.setCentralWidget(self.ren.getFrame())
@@ -608,7 +716,7 @@ class MAVTKSurfViewer(QtGui.QMainWindow): #{
     r = 4203829009 # seed for an OK sequence of colors
     for f in files: #{
       self.addSurf(os.path.basename(f), iCol, self._def_opacity, f)
-      r = self.getRandomColor(r, iCol)
+      r = self._getRandomColor(r, iCol)
     #}
     # Add pick observer
     self.ren.getPicker().AddObserver("EndPickEvent", self.cellPicked)
@@ -616,7 +724,19 @@ class MAVTKSurfViewer(QtGui.QMainWindow): #{
     self.ren.getRen().ResetCamera()
   #}
 
-  def getRandomColor(self, r, cols): #{
+  ###
+  # \function  _getRandomColor
+  # \brief     Gets a random colour as a VTK tripple float colour array.
+  #            The previous value is used to ensure a repeatable random
+  #            sequence. The values selected use a basic Lehmer random number
+  #            generator but the values are constrained a little to avoid
+  #            almost black or almost white colours.
+  # \return    Value used to ensure repeatable sequence.
+  # \param r                   Previous value returned.
+  # \param cols                Array of three floats for VTK colours, set
+  #                            on return.
+  ###
+  def _getRandomColor(self, r, cols): #{
     d = 0.0
     e = 0.0
     while (d < 1.0) and ((e < 1.0) or (e > 2.0)): #{
@@ -654,19 +774,27 @@ class MAVTKSurfViewer(QtGui.QMainWindow): #{
     picker = self.ren.getPicker()
     if picker.GetCellId() >= 0: #{
       pActor = picker.GetActor();
-      actorArray = self.actors.actors
+      actorArray = self._actors._actors
       for idx in range(0, len(actorArray)): #{
         if actorArray[idx] == pActor: #{
-          self.actors.table.selectRow(idx)
+          self._actors.selectActor(idx)
         #}
       #}
     #}
   #}
 
+  ###
+  # \function  addSurf
+  # \brief     Adds a surface to the viewer.
+  # \param name                Actor name.
+  # \param v_col               Actor colour as a VTK triple float array.
+  # \param opacity             Actor opacity as a float with range [0.0-1.0].
+  # \param path                Actor file path.
+  ### 
   def addSurf(self, name, v_col, opacity, path): #{
     reader = None
     file_type = path.split(".")[-1]
-    if file_type in self.file_formats: #{
+    if file_type in self._file_formats: #{
       if file_type == 'obj': #{
         reader = vtk.vtkOBJReader()
       elif file_type == 'stl': #}{
@@ -688,27 +816,36 @@ class MAVTKSurfViewer(QtGui.QMainWindow): #{
     self.ren.getRen().AddActor(actor)
     self.ren.Render()
     q_col = Qt.QColor(255 * v_col[0], 255 * v_col[1], 255 * v_col[2])
-    self.actors.addActor(actor, name, q_col, opacity, path)
+    self._actors.addActor(actor, name, q_col, opacity, path)
   #}
 
+  ###
+  # \function  openFile
+  # \brief     Opens a file, reads a surface and adds an actor for it.
+  ###
   def openFile(self): #{
     c = ''
     s = 'Surface files ('
-    for f in self.file_formats:
+    for f in self._file_formats:
       s = s + c + '*.' + f
       c = ' '
     s = s + ');; All files (*)'
     path = QtGui.QFileDialog.getOpenFileName(self, 'Open surface file',
-               self.current_path, s)
+               self._current_path, s)
     if(path): #{
       p = str(path)
       self.addSurf(os.path.basename(p), self._def_color, self._def_opacity, p)
     #}
   #}
 
+  ###
+  # \function  saveImage
+  # \brief     Prompts for file path using a QFileDialog and then saves
+  #            the current rendered image to the file.
+  ###
   def saveImage(self): #{
     path = QtGui.QFileDialog.getSaveFileName(self, 'Write rendered image',
-               self.current_path,
+               self._current_path,
                'Image files (*.bmp *.png *.pnm *.tif *.tiff);;' +
                'All files (*)')
     if(path): #{
@@ -720,25 +857,31 @@ class MAVTKSurfViewer(QtGui.QMainWindow): #{
     #}
   #}
 
+  ###
+  # \function  saveActors
+  # \brief     Prompts for a file path and then saves the current actor
+  #            settings to the file. The settings are saved using a json
+  #            dump.
+  ###
   def saveActors(self): #{
     path = QtGui.QFileDialog.getSaveFileName(self, 'Write actor settings',
-               self.current_path,
+               self._current_path,
                'Actor settings files (*.jsn *.jason);;All files (*)')
-    n_act = self.actors.getNumActors()
+    n_act = self._actors.getNumActors()
     act_ary = []
     for idx in range(0, n_act): #{
-      col = self.actors.getActorColor(idx)
+      col = self._actors.getActorColor(idx)
       act_ary.append( \
         { \
-          'name': self.actors.getActorName(idx), \
+          'name': self._actors.getActorName(idx), \
           'color': [col.red(), col.blue(), col.green()], \
-          'opacity': self.actors.getActorOpacity(idx), \
-          'path': self.actors.getActorPath(idx) \
+          'opacity': self._actors.getActorOpacity(idx), \
+          'path': self._actors.getActorPath(idx) \
         })
     #}
     data = { \
-      'ident': self.actor_file_ident, \
-      'version': self.version, \
+      'ident': self._actor_file_ident, \
+      'version': self._version, \
       'num_actors': n_act, \
       'actors': act_ary
       }
@@ -756,9 +899,16 @@ class MAVTKSurfViewer(QtGui.QMainWindow): #{
     #}
   #}
 
+  ###
+  # \function  loadActors
+  # \brief     Prompts for a file path and then reads acor settings from the
+  #            file, where these have been saved using the json format of
+  #            saveActors(). The actors are added and do not replace existing
+  #            actors.
+  ###
   def loadActors(self): #{
     path = QtGui.QFileDialog.getOpenFileName(self, 'Load actor settings',
-               self.current_path,
+               self._current_path,
                'Actor settings files (*.jsn *.jason);;All files (*)')
     if(path): #{
       n_act = 0
@@ -769,7 +919,7 @@ class MAVTKSurfViewer(QtGui.QMainWindow): #{
         f.close()
         if bool(data): #{
           n_act = int(data['num_actors'])
-          if (not str(data['ident']) == self.actor_file_ident) or \
+          if (not str(data['ident']) == self._actor_file_ident) or \
              (n_act < 0): #{
             data = None
           #}
@@ -802,56 +952,73 @@ class MAVTKSurfViewer(QtGui.QMainWindow): #{
   #}
 
   def getNumActors(self): #{
-    return self.table.rowCount()
+    return self._table.rowCount()
   #}
 
   def getActor(self, idx): #{
-    actor = self.actors[idx]
+    actor = self._actors[idx]
     return actor
   #}
 
   def getActorName(self, idx): #{
-    name = str(self.table.item(idx, self.tableDict['Name']).text())
+    name = str(self._table.item(idx, self.tableDict['Name']).text())
     return name
   #}
 
   def getActorColor(self, idx): #{
-    q_col = self.table.item(idx, self.tableDict['Color']).backgroundColor()
+    q_col = self._table.item(idx, self.tableDict['Color']).backgroundColor()
     return q_col
   #}
 
   def getActorOpacity(self, idx): #{
-    opacity = float(self.table.item(idx, self.tableDict['Opacity']).text())
+    opacity = float(self._table.item(idx, self.tableDict['Opacity']).text())
     return opacity
   #}
 
   def getActorPath(self, idx): #{
-    path = str(self.table.item(idx, self.tableDict['Path']).text())
+    path = str(self._table.item(idx, self.tableDict['Path']).text())
 
   def createMovie(self): #{
-    self.movie.show()
+    self._movie.show()
   #}
 
+  ###
+  # \function  movieStop
+  # \brief     Stop any movie creation by setting a flag.
+  ###
   def movieStop(self): #{
-    self.movie.setStateStop()
+    self._movie.setStateStop()
   #}
 
+  ###
+  # \function  animationLoop
+  # \brief     Renders a single frame of a movie, saves it to a file and
+  #            then checks for a flag set to destroy the timer which
+  #            might call this function.
+  ###
   def animationLoop(self, object, event): #{
     self.ren.Render()
     self.saveMovieFrame()
-    if self.movie.stateIsStop(): #{
-      self.ren.getIRen().DestroyTimer(self.animation)
+    if self._movie.stateIsStop(): #{
+      self.ren.getIRen().DestroyTimer(self._animation)
     #}
   #}
 
+  ###
+  # \function  movieStart
+  # \brief     Starts creating movie images.
+  #            If the number of steps is greater than zero then the
+  #            fixed animation is run, otherwise frames are stored as
+  #            rendered until the movie creation process is stopped.
+  ###
   def movieStart(self): #{
     img = vtk.vtkWindowToImageFilter()
-    if self.movie.stateIsStop(): #{
-      self.movie.setStateRun()
+    if self._movie.stateIsStop(): #{
+      self._movie.setStateRun()
       cam = self.ren.getRen().GetActiveCamera()
-      rot = self.movie.getDegPerStep()
-      axis = self.movie.getAxis()
-      nSteps = self.movie.getNumStep()
+      rot = self._movie.getDegPerStep()
+      axis = self._movie.getAxis()
+      nSteps = self._movie.getNumStep()
       if nSteps > 0: #{
         for step in range(0, nSteps): #{
           if axis == 'X': #{
@@ -864,19 +1031,19 @@ class MAVTKSurfViewer(QtGui.QMainWindow): #{
           cam.OrthogonalizeViewUp()
           self.ren.Render()
           self.saveMovieFrame()
-          if self.movie.stateIsStop(): #{
+          if self._movie.stateIsStop(): #{
             break
           #}
         #}
-        if not self.movie.stateIsStop(): #{
-          self.movie.setStateStop()
+        if not self._movie.stateIsStop(): #{
+          self._movie.setStateStop()
         #}
       #}
       else: #{
         iren = self.ren.getIRen()
-        self.animation = iren.CreateRepeatingTimer(100)
+        self._animation = iren.CreateRepeatingTimer(100)
         iren.AddObserver('TimerEvent', self.animationLoop, 0.0)
-        self.movie.setStateRun()
+        self._movie.setStateRun()
     else: #}{
       QtGui.QMessageBox.critical(self,
                    'Warning',
@@ -885,17 +1052,27 @@ class MAVTKSurfViewer(QtGui.QMainWindow): #{
       #}
     #}
       
+  ###
+  # \function  saveMovieFrame
+  # \brief     Save a rendered image to a file with a path formed by the
+  #            base path and an appended index counter.
+  ###
   def saveMovieFrame(self): #{
-    idx = self.movie.getFileIndex()
-    base_path = self.movie.getFilename()
+    idx = self._movie.getFileIndex()
+    base_path = self._movie.getFilename()
     base_dir = os.path.dirname(base_path)
     split_base_file = os.path.splitext(os.path.basename(base_path))
     path = base_dir + '/' + split_base_file[0] + '_' + '{:08}'.format(idx) + \
            split_base_file[1]
     self.ren.writeFrameToFile(path)
-    self.movie.incFileIndex()
+    self._movie.incFileIndex()
   #}
 
+  ###
+  # \function setBackground
+  # \brief    Prompts the user for a color and then uses it to set the
+  #           background colour of the render window.
+  ###
   def setBackground(self): #{
     q_col = QtGui.QColorDialog.getColor()
     if q_col.isValid(): #{
@@ -905,45 +1082,83 @@ class MAVTKSurfViewer(QtGui.QMainWindow): #{
   #}
 
   def showTable(self): #{
-    if self.actors.isVisible(): #{
-      self.actors.hide()
+    if self._actors.isVisible(): #{
+      self._actors.hide()
     else: #}{
-      self.actors.show()
+      self._actors.show()
     #}
   #}
 
+  ###
+  # \function  resetView
+  # \brief     Resets the camera to make sure that all actors ar visible.
+  ###
   def resetView(self): #{
     self.ren.getRen().ResetCamera()
   #}
 
+  ###
+  # \function  setActorVisible
+  # \brief     Sets the actor visibility to the given state in both the actor
+  #            table and the VTK render window.
+  # \param idx                 Index of the actor in the actor table.
+  # \param state               required visibility (boolean).
+  ###
+  def setActorVisible(self, idx, state): #{
+    actor = self._actors.getActor(idx)
+    actor.SetVisibility(state)
+    self._actors.setActorVisible(idx, state)
+    self.ren.Render()
+  #}
+
+  ###
+  # \function  setActorColor
+  # \brief     Sets the actor colour in both the actor table and the VTK
+  #            render window.
+  # \param idx                 Index of the actor in the actor table.
+  # \param q_col               Colour in QColor form.
+  ###
   def setActorColor(self, idx, q_col): #{
-    actor = self.actors.getActor(idx)
+    actor = self._actors.getActor(idx)
     v_col = [q_col.red() / 255.0, q_col.green() / 255.0, q_col.blue() / 255.0]
     actor.GetProperty().SetDiffuseColor(v_col)
-    self.actors.setActorColor(idx, q_col)
+    self._actors.setActorColor(idx, q_col)
     self.ren.Render()
   #}
 
+  ###
+  # \function  setActorOpacity
+  # \brief     Sets the actor opacity in both the actor table and the VTK
+  #            render window.
+  # \param idx                 Index of the actor in the actor table.
+  # \param q_col               Opacity as a flaot, range [0.0-1.0].
+  ###
   def setActorOpacity(self, idx, op): #{
-    actor = self.actors.getActor(idx)
+    actor = self._actors.getActor(idx)
     actor.GetProperty().SetOpacity(op)
-    self.actors.setActorOpacity(idx, op)
+    self._actors.setActorOpacity(idx, op)
     self.ren.Render()
   #}
 
+###
+# \function  main
+# \brief     Main function for the application which parses any command line
+#            options then passes any files given on the command line to the
+#            main application constructor.
+###
 def main(): #{
   app = QtGui.QApplication(sys.argv)
   parser = argparse.ArgumentParser(
       description='Interactive display of surfaces.',
       epilog='Supported surface formats are: ' +
-             str(MAVTKSurfViewer.file_formats) + '.\n')
+             str(MAVTKSurfViewer._file_formats) + '.\n')
   parser.add_argument('-v', '--version',
       action='store_true', default=False, \
       help='Show version and exit.')
   parser.add_argument('file', nargs='*')
   args = parser.parse_args()
   if(args.version): #{
-    print(MAVTKSurfViewer.version)
+    print(MAVTKSurfViewer._version)
     sys.exit(0)
   #}
   sv = MAVTKSurfViewer(args.file)
