@@ -839,6 +839,15 @@ class MAVTKSurfViewer(QtGui.QMainWindow): #{
 
   def cellPicked(self, object, event): #{
     picker = self.ren.getPicker()
+    pt = picker.GetPointId()
+    cell = picker.GetCellId()
+    pos = picker.GetPickPosition()
+    print(pt)
+    print(cell)
+    print(pos)
+    self.statusBar().showMessage('Pick: point = ' + str(pt) + \
+                                 ', cell = ' + str(cell) + \
+                                 ', pos = ' + str(pos))
     if picker.GetCellId() >= 0: #{
       pActor = picker.GetActor();
       actorArray = self._actors._actors
