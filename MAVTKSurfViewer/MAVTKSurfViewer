@@ -49,6 +49,65 @@ from PyQt4 import Qt, QtCore, QtGui
 import vtk
 from vtk.qt4.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
 
+html_page_begin = \
+r"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<title>Export from MAVTKSurfViewer</title>
+<meta charset="utf-8">
+<style>
+body {
+  font-family      : Monospace;
+  background-color : #000;
+  color            : #fff;
+  margin           : 0px;
+  overflow         : hidden;
+}
+</style>
+</head>
+
+<body>
+<div id="info">
+Export from MAVTKSurfViewer
+</div>
+
+<script src="js/three.min.js"></script>
+<script src="js/TrackballControls.js"></script>
+<script src="js/STLLoader.js"></script>
+<script src="js/MAVTKLoader.js"></script>
+<script src="js/Detector.js"></script>
+<script src="js/MARender.min.js"></script>
+
+<script>
+pickHandler = function(e) {
+  var txt = 'Objects (front to back):\n';
+  for(var i = 0; i < e.hitlist.length; ++i) {
+    var hit = e.hitlist[i].object;
+    txt = txt + '  ' + hit.name + '\n';
+  }
+  window.alert(txt);
+}
+
+if(!(Detector.webgl)) {
+  Detector.addGetWebGLMessage();
+}
+
+var container;
+container = document.createElement('div');
+document.body.appendChild(container);
+
+var ren = new MARenderer(window, container);
+ren.init();
+"""
+
+html_page_end = \
+r"""
+ren.addEventListener('pick', pickHandler);
+ren.animate();
+</script>
+</body>
+</html>"""
+
 class CameraSettings(): #{
   position = [0.0, 0.0, 0.0]
   focalPoint = [0.0, 0.0, 0.0]
@@ -700,10 +759,17 @@ class MAVTKSurfViewer(QtGui.QMainWindow): #{
     fSaveImage.triggered.connect(self.saveImage)
     fMenu.addAction(fSaveImage)
     # 
-    fSaveActors = QtGui.QAction(QtGui.QIcon('save.png'), 'Save Actors', self)
+    fSaveActors = QtGui.QAction(QtGui.QIcon('save.png'), \
+                                'Save Actor Settings', self)
     fSaveActors.setStatusTip('Save actor settings')
     fSaveActors.triggered.connect(self.saveActors)
     fMenu.addAction(fSaveActors)
+    #
+    fExportActors = QtGui.QAction(QtGui.QIcon('save.png'), \
+                                  'Export Actors as Web Page', self)
+    fExportActors.setStatusTip('Export Actors as Web Page')
+    fExportActors.triggered.connect(self.exportActors)
+    fMenu.addAction(fExportActors)
     # 
     fLoadActors = QtGui.QAction(QtGui.QIcon('save.png'), 'Load Actors', self)
     fLoadActors.setStatusTip('Load actor settings')
@@ -977,6 +1043,46 @@ class MAVTKSurfViewer(QtGui.QMainWindow): #{
             QtGui.QMessageBox.Close)
       #}
     #}
+  #}
+
+  ###
+  # \function exportActors
+  # \brief    Prompts for a file path and then exports the current actor
+  #           settings to a web page which uses MARender and three.js
+  ###
+  def exportActors(self): #{
+    path = QtGui.QFileDialog.getSaveFileName(self, 'Export actors as web page',
+               self._current_path,
+               'HTML files (*.html);;All files (*)')
+    page_text = html_page_begin
+    n_act = self._actors.getNumActors()
+    for idx in range(0, n_act): #{
+      if self._actors.getActorVisability(idx): #{
+        col = self._actors.getActorColor(idx)
+        page_text = page_text + \
+                    'ren.addModel({name:        \'' + \
+                    self._actors.getActorName(idx) + '\',\n' + \
+                    '              path:        \'' + \
+                    self._actors.getActorPath(idx) + '\',\n' + \
+                    '              transparent: true,\n' + \
+                    '              opacity:     ' + \
+                    str(self._actors.getActorOpacity(idx)) + ',\n' + \
+                    '              color:       0x' + \
+                    col.name()[1:] + ',\n' + \
+                    '              mode:        MARenderMode.PHONG});\n'
+      #}
+    #}
+    page_text = page_text + html_page_end
+    try: #{
+      f = io.open(str(path), 'w')
+      f.write(unicode(page_text))
+      f.close()
+    except: #}{
+        QtGui.QMessageBox.critical(self,
+            'Error',
+            'Failed to export actors as web page file ' + path + '.',
+            QtGui.QMessageBox.Close)
+      #}
   #}
 
   ###
