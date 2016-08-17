@@ -765,13 +765,20 @@ class MAVTKSurfViewer(QtGui.QMainWindow): #{
     fSaveActors.triggered.connect(self.saveActors)
     fMenu.addAction(fSaveActors)
     #
-    fExportActors = QtGui.QAction(QtGui.QIcon('save.png'), \
+    fExportActorsForWeb = QtGui.QAction(QtGui.QIcon('save.png'), \
                                   'Export Actors as Web Page', self)
-    fExportActors.setStatusTip('Export Actors as Web Page')
-    fExportActors.triggered.connect(self.exportActors)
-    fMenu.addAction(fExportActors)
+    fExportActorsForWeb.setStatusTip('Export Actors as Web Page')
+    fExportActorsForWeb.triggered.connect(self.exportActorsForWeb)
+    fMenu.addAction(fExportActorsForWeb)
     # 
-    fLoadActors = QtGui.QAction(QtGui.QIcon('save.png'), 'Load Actors', self)
+    fExportActorsForMARV = QtGui.QAction(QtGui.QIcon('save.png'), \
+                           'Export Actors as MARenderView config', self)
+    fExportActorsForMARV.setStatusTip('Export Actors as MARenderView config')
+    fExportActorsForMARV.triggered.connect(self.exportActorsForMARV)
+    fMenu.addAction(fExportActorsForMARV)
+    #
+    fLoadActors = QtGui.QAction(QtGui.QIcon('save.png'), \
+                                'Load Actor Settings', self)
     fLoadActors.setStatusTip('Load actor settings')
     fLoadActors.triggered.connect(self.loadActors)
     fMenu.addAction(fLoadActors)
@@ -1011,7 +1018,7 @@ class MAVTKSurfViewer(QtGui.QMainWindow): #{
   def saveActors(self): #{
     path = QtGui.QFileDialog.getSaveFileName(self, 'Write actor settings',
                self._current_path,
-               'Actor settings files (*.jsn *.jason);;All files (*)')
+               'Actor settings files (*.jsn *.json);;All files (*)')
     n_act = self._actors.getNumActors()
     act_ary = []
     for idx in range(0, n_act): #{
@@ -1046,12 +1053,13 @@ class MAVTKSurfViewer(QtGui.QMainWindow): #{
   #}
 
   ###
-  # \function exportActors
+  # \function exportActorsForWeb
   # \brief    Prompts for a file path and then exports the current actor
   #           settings to a web page which uses MARender and three.js
   ###
-  def exportActors(self): #{
-    path = QtGui.QFileDialog.getSaveFileName(self, 'Export actors as web page',
+  def exportActorsForWeb(self): #{
+    path = QtGui.QFileDialog.getSaveFileName(self,
+               'Export actors for web page',
                self._current_path,
                'HTML files (*.html);;All files (*)')
     page_text = html_page_begin
@@ -1086,6 +1094,73 @@ class MAVTKSurfViewer(QtGui.QMainWindow): #{
   #}
 
   ###
+  # \function exportActorsForWeb
+  # \brief    Prompts for a file path and then exports the current actor
+  #           settings to a json MARenderView configuration file.
+  ###
+  def exportActorsForMARV(self): #{
+    path = QtGui.QFileDialog.getSaveFileName(self,
+               'Export actors for MARenderView',
+               self._current_path,
+               'Json files (*.jsn *.json);;All files (*)')
+    n_act = self._actors.getNumActors()
+    section_view = { \
+                     'dst': 0, \
+                     'pit': 0, \
+                     'yaw': 0, \
+                     'fxp': {'x' : 0, 'y': 0, 'z': 0}
+                   }
+    section = { \
+                'idx': 0, \
+                'name': 'section', \
+                'transparent': True, \
+                'color': '0xffffff', \
+                'opacity': 1.0, \
+                'wlz': 'null'
+              }
+    domains = []
+    for idx in range(0, n_act): #{
+      if self._actors.getActorVisability(idx): #{
+        col = self._actors.getActorColor(idx)
+        trans = ((self._actors.getActorOpacity(idx) + 0.0001) < 1.0);
+        hexcol = '0x' + str(col.name()[1:])
+        domains.append( \
+          { \
+            'idx' : idx, \
+            'name': self._actors.getActorName(idx), \
+            'path': self._actors.getActorPath(idx), \
+            'transparent': trans, \
+            'color': hexcol, \
+            'opacity': self._actors.getActorOpacity(idx)
+          })
+      #}
+    #}
+    config = { \
+      'title': 'Export from VAVTKSurfViewer', \
+      'info': 'Export from VAVTKSurfViewer (version ' + \
+              self._version + ').', \
+      'iip3dsrv': 'http://localhost/fcgi-bin/wlziipsrv.fcgi', \
+      'show_gui': True,
+      'section_view': section_view, \
+      'section': section, \
+      'domains': domains
+      }
+    if(path): #{
+      try: #{
+        f = io.open(str(path), 'w', encoding='utf-8')
+        f.write(unicode(json.dumps(config)))
+        f.close()
+      except: #}{
+        QtGui.QMessageBox.critical(self,
+            'Error',
+            'Failed to write MARenderView config to file ' + \
+            path + '.',
+            QtGui.QMessageBox.Close)
+      #}
+    #}
+  #}
+
+  ###
   # \function  loadActors
   # \brief     Prompts for a file path and then reads acor settings from the
   #            file, where these have been saved using the json format of
@@ -1095,7 +1170,7 @@ class MAVTKSurfViewer(QtGui.QMainWindow): #{
   def loadActors(self): #{
     path = QtGui.QFileDialog.getOpenFileName(self, 'Load actor settings',
                self._current_path,
-               'Actor settings files (*.jsn *.jason);;All files (*)')
+               'Json files (*.jsn *.json);;All files (*)')
     if(path): #{
       n_act = 0
       data = None
