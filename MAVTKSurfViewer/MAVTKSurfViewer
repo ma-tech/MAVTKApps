@@ -720,7 +720,7 @@ class MovieCreationDialog(QtGui.QDialog): #{
 #              This has a menu bar, render window and status bar.
 ###
 class MAVTKSurfViewer(QtGui.QMainWindow): #{
-  _version = '0.0.1'
+  _version = '1.0.0'
   _actor_file_ident = 'MAVTKSurfViewer Actor Settings'
   _file_formats = ['obj', 'stl', 'vtk']
   _animation = 0
