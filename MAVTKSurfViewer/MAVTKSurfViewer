@@ -32,7 +32,8 @@
 # License along with this program; if not, write to the Free
 # Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
 # Boston, MA  02110-1301, USA.
-# \brief        Interactive display of surfaces.
+# \brief        Interactive display of surfaces with export to various
+#               systems..
 # \ingroup      MAVTKApps
 ###
 
@@ -49,11 +50,18 @@ from PyQt4 import Qt, QtCore, QtGui
 import vtk
 from vtk.qt4.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
 
-html_page_begin = \
-r"""<!DOCTYPE html>
+_debug = False
+
+html_page = [ \
+#0
+r"""
+<!DOCTYPE html>
 <html lang="en">
 <head>
-<title>Export from MAVTKSurfViewer</title>
+""",
+#<title>Export from MAVTKSurfViewer</title>
+#1
+r"""
 <meta charset="utf-8">
 <style>
 body {
@@ -67,10 +75,12 @@ body {
 </head>
 
 <body>
-<div id="info">
-Export from MAVTKSurfViewer
-</div>
-
+""",
+#2
+#<div id="info">
+#Export from MAVTKSurfViewer
+#</div>
+r"""
 <script src="js/three.min.js"></script>
 <script src="js/TrackballControls.js"></script>
 <script src="js/STLLoader.js"></script>
@@ -98,22 +108,46 @@ document.body.appendChild(container);
 
 var ren = new MARenderer(window, container);
 ren.init();
-"""
-
-html_page_end = \
+""",
+#3
 r"""
 ren.addEventListener('pick', pickHandler);
 ren.animate();
 </script>
 </body>
 </html>"""
+]
 
-class CameraSettings(): #{
+###
+# \function   debugMsg
+# \brief      Prints a debug message (to stderr) if debugging is enabled.
+###
+def debugMsg(msg): #{
+  global _debug
+  if _debug: #{
+    print(msg, file=sys.stderr)
+  #}
+#}
+
+###
+# \function   warnMsg
+# \brief      Prints a warning message.
+###
+def warnMsg(msg): #{
+  print(msg, file=sys.stderr)
+#}
+
+##class       MAVTKCameraSettings
+# \brief       Data structure which holds sufficient camera data to
+#              save/restore a view.
+###
+class MAVTKCameraSettings(): #{
   position = [0.0, 0.0, 0.0]
   focalPoint = [0.0, 0.0, 0.0]
   viewUp = [0.0, 0.0, 0.0]
   viewAngle = 0.0
   parallelScale = 1.0
+  clippingRange = [ 1.0, 1000.0]
 #}
 
 ###
@@ -127,6 +161,10 @@ class MAVTKRenderer(): #{
     self.initUI()
   #}
     
+  ###
+  # \function   initUI
+  # \brief      Create VTK QFrame for rendering.
+  ###
   def initUI(self): #{
     self._frame = QtGui.QFrame()
     vl = QtGui.QVBoxLayout()
@@ -135,10 +173,15 @@ class MAVTKRenderer(): #{
     self._frame.setLayout(vl)
   #}
 
+  ###
+  # \function   init
+  # \brief      Create the VTK rendering system.
+  ###
   def init(self): #{
     self._ren = vtk.vtkRenderer()
     self._picker = vtk.vtkCellPicker()
     self._renWin = self.vtkWidget.GetRenderWindow()
+    debugMsg(self._renWin)
     self._renWin.AddRenderer(self._ren)
     iren  = self._renWin.GetInteractor()
     istyle = vtk.vtkInteractorStyleSwitch()
@@ -148,10 +191,18 @@ class MAVTKRenderer(): #{
     iren.Initialize()
   #}
 
+  ###
+  # \function  getIRen
+  # \brief     Access the VTK render window interactor.
+  ###
   def getIRen(self): #{
     return self._renWin.GetInteractor()
   #}
 
+  ###
+  # \function  getRenWin
+  # \brief     Access the VTK render window.
+  ###
   def getRenWin(self): #{
     return self._renWin
   #}
@@ -162,14 +213,14 @@ class MAVTKRenderer(): #{
   ###
   def getView(self): #{
     cam = self._ren.GetActiveCamera()
-    v = CameraSettings()
+    v = MAVTKCameraSettings()
     v.position = cam.GetPosition()
     v.focalPoint = cam.GetFocalPoint()
     v.viewUp = cam.GetViewUp()
     v.viewAngle = cam.GetViewAngle()
     v.parallelScale = cam.GetParallelScale()
+    v.clippingRange = cam.GetClippingRange()
     return v
-
   #}
 
   ###
@@ -184,18 +235,31 @@ class MAVTKRenderer(): #{
     cam.SetViewUp(v.viewUp)
     cam.SetViewAngle(v.viewAngle)
     cam.SetParallelScale(v.parallelScale)
+    cam.SetClippingRange(v.clippingRange)
     self.Render()
   #}
 
 
+  ###
+  # \function   getRen
+  # \brief      Access the renderer.
+  ###
   def getRen(self): #{
     return self._ren
   #}
 
+  ###
+  # \function   getPicker
+  # \brief      Access the object picker.
+  ###
   def getPicker(self): #{
     return self._picker
   #}
 
+  ###
+  # \function   getFilename
+  # \brief      Access the renderer's frame widget.
+  ###
   def getFrame(self): #{
     return self._frame
   #}
@@ -294,10 +358,19 @@ class MAVTKActorTable(QtGui.QDialog): #{
     self._table.setSelectionBehavior(QtGui.QAbstractItemView.SelectRows)
   #}
 
+  ###
+  # \function   cancel
+  # \brief      Slot to hide the dialog.
+  ###
   def cancel(self): #{
     self.hide()
   #}
 
+  ###
+  # \function   textToFloat
+  # \brief      Converts the given string to a float.
+  # \return     Float value (0.0 if not a float).
+  ###
   def textToFloat(self, txt): #{
     try: #{
       val = float(txt)
@@ -317,9 +390,13 @@ class MAVTKActorTable(QtGui.QDialog): #{
   #            this allows simple index based actor selection
   ###
   def delActor(self, idx): #{
-    print('delActor() - not implemented', file=sys.stderr)
+    warnMsg('delActor() - not implemented')
   #}
 
+  ###
+  # \function   addActor
+  # \brief      Adds an actor.
+  ###
   def addActor(self, actor, visible, name, color, opacity, path): #{
     idx = len(self._actors)
     self._actors.insert(idx, actor)
@@ -414,45 +491,88 @@ class MAVTKActorTable(QtGui.QDialog): #{
     self._table.setItem(idx, self._tableDict['Path'], itm)
   #}
 
+  ###
+  # \function   selectActor
+  # \brief      Select actor in table given it's index.
+  ###
   def selectActor(self, idx): #{
     self._table.selectRow(idx)
   #}
 
+  ###
+  # \function   getNumActors
+  # \brief      Access the number of actors in the table.
+  # \return     Number of actors in the table.
+  ###
   def getNumActors(self): #{
     return self._table.rowCount()
   #}
 
+  ###
+  # \function   getActor
+  # \brief      Access an actor in the table given it's index.
+  # \return     The actor.
+  ###
   def getActor(self, idx): #{
     actor = self._actors[idx]
     return actor
   #}
 
+  ###
+  # \function   getActorVisability
+  # \brief      Access the actor's visibility.
+  # \return     Whether the actor is visible (boolean).
+  ###
   def getActorVisability(self, idx): #{
     vis = 'True' == \
           str(self._table.item(idx, self._tableDict['Visible']).text())
     return vis
   #}
 
+  ###
+  # \function   getActorName
+  # \brief      Access an actor's name given it's index in the table.
+  # \return     Actor name.
+  ###
   def getActorName(self, idx): #{
     name = str(self._table.item(idx, self._tableDict['Name']).text())
     return name
   #}
 
+  ###
+  # \function   getActorColor
+  # \brief      Access actor's colour given it's index.
+  # \return     The actors colour (QColor).
+  ###
   def getActorColor(self, idx): #{
     q_col = self._table.item(idx, self._tableDict['Color']).backgroundColor()
     return q_col
   #}
 
+  ###
+  # \function getActorOpacity
+  # \brief    Acces actor's opacity given it's index.
+  # \return   Actor's opacity.
+  ###
   def getActorOpacity(self, idx): #{
     opacity = float(self._table.item(idx, self._tableDict['Opacity']).text())
     return opacity
   #}
 
+  ###
+  # \function getActorPath
+  # \brief    Access actor's file path.
+  # \return   File path string.
+  ###
   def getActorPath(self, idx): #{
     path = str(self._table.item(idx, self._tableDict['Path']).text())
     return path
   #}
 
+  ###
+  # \function cellClicked
+  # \brief    Slot for cell of table clicked.
+  ###
   def cellClicked(self, idx, prop): #{
     if prop == self._tableDict['Visible']: #{
       vis = not self.getActorVisability(idx)     
@@ -465,6 +585,10 @@ class MAVTKActorTable(QtGui.QDialog): #{
     #}
   #}
 
+  ###
+  # \function cellChanged
+  # \brief    Slot for cell in table changed.
+  ###
   def cellChanged(self, idx, prop): #{
     if prop == self._tableDict['Opacity']: #{
       txt = self._table.item(idx, prop).text()
@@ -502,6 +626,10 @@ class AboutDialog(QtGui.QDialog): #{
     lo.addWidget(but)
   #}
 
+  ###
+  # \function cancel
+  # \brief    Slot to hide dialog.
+  ###
   def cancel(self): #{
     self.hide()
   #}
@@ -519,6 +647,10 @@ class ControlsDialog(QtGui.QDialog): #{
     self.initUI()
   #}
 
+  ###
+  # \function initUI
+  # \brief    Build the interactive controls help dislog.
+  ###
   def initUI(self): #{
     msg = '<b>MAVTKSurfViewer Interactive Controls</b>' + \
     '<br>' + \
@@ -553,6 +685,10 @@ class ControlsDialog(QtGui.QDialog): #{
     lo.addWidget(but)
   #}
 
+  ###
+  # \function cancel
+  # \brief    Slot to hide dialog.
+  ###
   def cancel(self): #{
     self.hide()
   #}
@@ -568,6 +704,10 @@ class MovieCreationState(object): #{
   run   = 1
 #}
 
+###
+# \class       MovieCreationDialog
+# \brief       Class for the movie creation dialog.
+###
 class MovieCreationDialog(QtGui.QDialog): #{
   _current_path = ''
 
@@ -577,15 +717,21 @@ class MovieCreationDialog(QtGui.QDialog): #{
     self._state = MovieCreationState.stop
   #}
 
+  ###
+  # \function   initUI
+  # \brief      Creates the movie creation dialog.
+  ###
   def initUI(self): #{
-    lov = QtGui.QVBoxLayout(self)
+    lom = QtGui.QVBoxLayout(self)
+    self.setWindowTitle('Movie Creation Parameters')
     fr_main = QtGui.QFrame()
     buttons = QtGui.QDialogButtonBox(QtGui.QDialogButtonBox.Cancel,
                   QtCore.Qt.Horizontal, self)
-    lov.addWidget(fr_main)
-    lov.addWidget(buttons)
+    lom.addWidget(fr_main)
+    lom.addWidget(buttons)
     loh  = QtGui.QHBoxLayout()
     fr_main.setLayout(loh)
+    fr_ttl  = QtGui.QFrame()
     fr_fxr  = QtGui.QFrame()
     fr_ctl  = QtGui.QFrame()
     loh.addWidget(fr_fxr)
@@ -598,26 +744,23 @@ class MovieCreationDialog(QtGui.QDialog): #{
     lb_nos = QtGui.QLabel('Number of Steps')
     lb_nos.setAlignment(QtCore.Qt.AlignLeft)
     lo_fxr.addWidget(lb_nos, 1, 0, 1, 2)
-    self._sp_nos = QtGui.QSpinBox()
-    self._sp_nos.setRange(0, 99999999)
-    self._sp_nos.setValue(0)
-    lo_fxr.addWidget(self._sp_nos, 1, 3, 1, 1)
+    self._sb_nos = QtGui.QSpinBox()
+    self._sb_nos.setRange(0, 99999999)
+    self._sb_nos.setValue(0)
+    lo_fxr.addWidget(self._sb_nos, 1, 3, 1, 1)
     lb_dps = QtGui.QLabel('Degrees per Step')
     lb_dps.setAlignment(QtCore.Qt.AlignLeft)
     lo_fxr.addWidget(lb_dps, 2, 0, 1, 2)
-    self._sp_dps = QtGui.QSpinBox()
-    self._sp_dps.setRange(-359, 359)
-    self._sp_dps.setValue(0)
-    lo_fxr.addWidget(self._sp_dps, 2, 3, 1, 1)
+    self._sb_dps = QtGui.QSpinBox()
+    self._sb_dps.setRange(-359, 359)
+    self._sb_dps.setValue(0)
+    lo_fxr.addWidget(self._sb_dps, 2, 3, 1, 1)
     lb_axis = QtGui.QLabel('Axis')
     lb_axis.setAlignment(QtCore.Qt.AlignLeft)
     lo_fxr.addWidget(lb_axis, 3, 0, 1, 2)
     self._cb_axis = QtGui.QComboBox()
     self._cb_axis.addItems(['X', 'Y', 'Z'])
     lo_fxr.addWidget(self._cb_axis, 3, 2, 1, 2)
-    lb_ctl = QtGui.QLabel('Movie Controls')
-    lb_ctl.setAlignment(QtCore.Qt.AlignCenter)
-    lo_ctl.addWidget(lb_ctl, 0, 0, 1, 4)
     lb_file = QtGui.QLabel('Base file name')
     lb_file.setAlignment(QtCore.Qt.AlignLeft)
     lo_ctl.addWidget(lb_file, 1, 0, 1, 2)
@@ -628,10 +771,10 @@ class MovieCreationDialog(QtGui.QDialog): #{
     lb_fix = QtGui.QLabel('File index')
     lb_fix.setAlignment(QtCore.Qt.AlignLeft)
     lo_ctl.addWidget(lb_fix, 3, 0, 1, 2)
-    self._sp_fix = QtGui.QSpinBox()
-    self._sp_fix.setRange(0, 99999999)
-    self._sp_fix.setValue(0)
-    lo_ctl.addWidget(self._sp_fix, 3, 2, 1, 2)
+    self._sb_fix = QtGui.QSpinBox()
+    self._sb_fix.setRange(0, 99999999)
+    self._sb_fix.setValue(0)
+    lo_ctl.addWidget(self._sb_fix, 3, 2, 1, 2)
     self._bt_start = QtGui.QPushButton('Start')
     lo_ctl.addWidget(self._bt_start, 4, 0, 1, 2)
     self._bt_stop = QtGui.QPushButton('Stop')
@@ -640,14 +783,26 @@ class MovieCreationDialog(QtGui.QDialog): #{
     buttons.rejected.connect(self.cancel)
   #}
 
+  ###
+  # \function cancel
+  # \brief    Slot to hide dialog.
+  ###
   def cancel(self): #{
     self.hide()
   #}
 
+  ###
+  # \function setStateRun
+  # \brief    Sets the movie creation state to run.
+  ###
   def setStateRun(self): #{
     self._state = MovieCreationState.run
   #}
 
+  ###
+  # \function setStateStop
+  # \brief    Sets the movie creation state to stop.
+  ###
   def setStateStop(self): #{
     self._state = MovieCreationState.stop
   #}
@@ -662,6 +817,10 @@ class MovieCreationDialog(QtGui.QDialog): #{
     return self._state == MovieCreationState.stop
   #}
 
+  ###
+  # \function   selectFile
+  # \brief      Creates a file dialog and uses it to set the base movie path.
+  ###
   def selectFile(self): #{
     path = QtGui.QFileDialog.getOpenFileName(self, 'Select base movie file',
                self._current_path,
@@ -672,18 +831,34 @@ class MovieCreationDialog(QtGui.QDialog): #{
     #}
   #}
   
+  ###
+  # \function getNumStep
+  # \brief    Access the number of steps in movie creation.
+  ###
   def getNumStep(self): #{
-    return self._sp_nos.value()
+    return self._sb_nos.value()
   #}
 
+  ###
+  # \function getDegPerStep
+  # \brief    Access the number of degrees per step in movie creation.
+  ###
   def getDegPerStep(self): #{
-    return self._sp_dps.value()
+    return self._sb_dps.value()
   #}
 
+  ###
+  # \function getAxis
+  # \brief    Access the axis for rotation in movie creation.
+  ###
   def getAxis(self): #{
     return str(self._cb_axis.currentText())
   #}
 
+  ###
+  # \function getFileIndex
+  # \brief    Access the movie creation base movie path.
+  ###
   def getFilename(self): #{
     path = str(self._le_path.text())
     if path == 'no file': #{
@@ -692,27 +867,264 @@ class MovieCreationDialog(QtGui.QDialog): #{
     return path
   #}
 
+  ###
+  # \function getNumStep
+  # \brief    Access the number of steps in movie creation.
+  ###
   def getFileIndex(self): #{
-    return self._sp_fix.value()
+    return self._sb_fix.value()
   #}
 
-  def setFileIndex(self, value): #{
-    self._sp_fix.setValue(value)
-  #}
-
+  ###
+  # \function incFileIndex
+  # \brief    Slot to increase the file index value.
+  ###
   def incFileIndex(self): #{
-    self._sp_fix.setValue(self._sp_fix.value() + 1)
+    self._sb_fix.setValue(self._sb_fix.value() + 1)
   #}
 
+  ###
+  # \function getStartPB
+  # \brief    Slot to start the timer.
+  # \return   Always timer started (boolean).
+  ###
   def getStartPB(self): #{
     return self._bt_start
   #}
 
+  ###
+  # \function getStopPB
+  # \brief    Slot to stop the timer.
+  # \return   Always timer stopped (boolean).
+  ###
   def getStopPB(self): #{
     return self._bt_stop
   #}
 #}
 
+###
+# \class       ExportMARDialog
+# \brief       Class for a dialog which exports the scene to an MARender
+#              web page.
+###
+class ExportMARDialog(QtGui.QDialog): #{
+
+  def __init__(self, parent = None): #{
+    super(ExportMARDialog, self).__init__(parent)
+    self._buttons = None
+    self._le_page_title = None
+    self._te_page_info = None
+    accepted = QtCore.pyqtSignal()
+    self.initUI()
+  #}
+
+  ###
+  # \function   initUI
+  # \brief      Creates the MARender scene export dialog.
+  ###
+  def initUI(self): #{
+    lom = QtGui.QVBoxLayout(self)
+    self.setWindowTitle('MARender Export Parameters')
+    fr_main = QtGui.QFrame()
+    self._buttons = QtGui.QDialogButtonBox(QtGui.QDialogButtonBox.Ok | \
+                        QtGui.QDialogButtonBox.Cancel,
+                        QtCore.Qt.Horizontal, self)
+    lom.addWidget(fr_main)
+    lom.addWidget(self._buttons)
+    lov  = QtGui.QVBoxLayout()
+    fr_main.setLayout(lov)
+    fr_ptl  = QtGui.QFrame()
+    fr_inf  = QtGui.QFrame()
+    lov.addWidget(fr_ptl)
+    lov.addWidget(fr_inf)
+    lo_ptl = QtGui.QGridLayout(fr_ptl)
+    lo_inf = QtGui.QGridLayout(fr_inf)
+    lb_ptl = QtGui.QLabel('Page Title')
+    lb_ptl.setAlignment(QtCore.Qt.AlignLeft)
+    lo_ptl.addWidget(lb_ptl, 0, 0, 1, 1)
+    self._le_page_title = QtGui.QLineEdit('Export from MAVTKSurfViewer')
+    lo_ptl.addWidget(self._le_page_title, 0, 1, 1, 8)
+    lb_inf = QtGui.QLabel('Page Info')
+    lb_inf.setAlignment(QtCore.Qt.AlignLeft)
+    lo_inf.addWidget(lb_inf, 0, 0, 1, 1)
+    self._te_page_info = QtGui.QTextEdit('Exported from MAVTKSurfViewer')
+    lo_inf.addWidget(self._te_page_info, 0, 1, 8, 8)
+    self._buttons.accepted.connect(self.ok)
+    self._buttons.rejected.connect(self.cancel)
+  #}
+
+  ###
+  # \function ok
+  # \brief    Slot to accept then hide the dialog.
+  ###
+  def ok(self): #{
+    self.accepted.emit()
+    self.hide()
+  #}
+
+  ###
+  # \function cancel
+  # \brief    Slot to hide dialog.
+  ###
+  def cancel(self): #{
+    self.hide()
+  #}
+
+  ###
+  # \function getPageTitle
+  # \brief    Access the page title.
+  ###
+  def getPageTitle(self): #{
+    page_title = str(self._le_page_title.text())
+    return page_title
+  #}
+
+  ###
+  # \function getPageInfo
+  # \brief    Access the page information text.
+  ###
+  def getPageInfo(self): #{
+    page_info = str(self._te_page_info.toPlainText())
+    return page_info
+  #}
+
+#}
+
+###
+# \class       ExportMARVDialog
+# \brief       Class for a dialog which exports the scene to an MARenderView
+#              web page configuration file.
+###
+class ExportMARVDialog(QtGui.QDialog): #{
+
+  def __init__(self, parent = None): #{
+    super(ExportMARVDialog, self).__init__(parent)
+    self._buttons = None
+    self._le_page_title = None
+    self._te_page_info = None
+    self._le_iip_srv = None
+    self._sb_ref_idx = None
+    accepted = QtCore.pyqtSignal()
+    self.initUI()
+  #}
+
+  ###
+  # \function   initUI
+  # \brief      Creates the MARenderView scene export dialog.
+  ###
+  def initUI(self): #{
+    lom = QtGui.QVBoxLayout(self)
+    self.setWindowTitle('MARenderView Config File  Export Parameters')
+    fr_main = QtGui.QFrame()
+    self._buttons = QtGui.QDialogButtonBox(QtGui.QDialogButtonBox.Ok | \
+                        QtGui.QDialogButtonBox.Cancel,
+                        QtCore.Qt.Horizontal, self)
+    lom.addWidget(fr_main)
+    lom.addWidget(self._buttons)
+    lov  = QtGui.QVBoxLayout()
+    fr_main.setLayout(lov)
+    fr_ptl = QtGui.QFrame()
+    fr_inf = QtGui.QFrame()
+    fr_iip_srv = QtGui.QFrame()
+    fr_ref_idx = QtGui.QFrame()
+    lov.addWidget(fr_ptl)
+    lov.addWidget(fr_inf)
+    lov.addWidget(fr_iip_srv)
+    lov.addWidget(fr_ref_idx)
+    lo_ptl = QtGui.QGridLayout(fr_ptl)
+    lo_inf = QtGui.QGridLayout(fr_inf)
+    lo_iip_srv = QtGui.QGridLayout(fr_iip_srv)
+    lo_ref_idx = QtGui.QGridLayout(fr_ref_idx)
+    #
+    lb_ptl = QtGui.QLabel('Page Title')
+    lb_ptl.setAlignment(QtCore.Qt.AlignLeft)
+    lo_ptl.addWidget(lb_ptl, 0, 0, 1, 1)
+    self._le_page_title = QtGui.QLineEdit('Export from MAVTKSurfViewer')
+    lo_ptl.addWidget(self._le_page_title, 0, 1, 1, 8)
+    #
+    lb_inf = QtGui.QLabel('Page Info')
+    lb_inf.setAlignment(QtCore.Qt.AlignLeft)
+    lo_inf.addWidget(lb_inf, 0, 0, 1, 1)
+    self._te_page_info = QtGui.QTextEdit('Exported from MAVTKSurfViewer')
+    lo_inf.addWidget(self._te_page_info, 0, 1, 8, 8)
+    #
+    lb_iip_srv = QtGui.QLabel('IIP3D Server')
+    lb_iip_srv.setAlignment(QtCore.Qt.AlignLeft)
+    lo_iip_srv.addWidget(lb_iip_srv, 0, 0, 1, 1)
+    self._le_iip_srv = QtGui.QLineEdit( \
+        'http://localhost/fcgi-bin/wlziipsrv.fcgi')
+    lo_iip_srv.addWidget(self._le_iip_srv, 0, 1, 1, 8)
+    #
+    lb_ref_idx = QtGui.QLabel('Ref Surface Index')
+    lb_ref_idx.setAlignment(QtCore.Qt.AlignLeft)
+    lo_ref_idx.addWidget(lb_ref_idx, 0, 0, 1, 1)
+    self._sb_ref_idx = QtGui.QSpinBox()
+    self._sb_ref_idx.setRange(0, 99999999)
+    self._sb_ref_idx.setValue(0)
+    lo_ref_idx.addWidget(self._sb_ref_idx, 0, 1, 1, 8)
+    #
+    self._buttons.accepted.connect(self.ok)
+    self._buttons.rejected.connect(self.cancel)
+  #}
+
+  ###
+  # \function ok
+  # \brief    Slot to accept then hide dialog.
+  ###
+  def ok(self): #{
+    self.accepted.emit()
+    self.hide()
+  #}
+
+  ###
+  # \function cancel
+  # \brief    Slot to hide dialog.
+  ###
+  def cancel(self): #{
+    self.hide()
+  #}
+
+  ###
+  # \function getPageTitle
+  # \brief    Access the page title.
+  # \return   The page title.
+  ###
+  def getPageTitle(self): #{
+    page_title = str(self._le_page_title.text())
+    return page_title
+  #}
+
+  ###
+  # \function getPageInfo
+  # \brief    Access the page information text.
+  # \return   The page information text string (plain text).
+  ###
+  def getPageInfo(self): #{
+    page_info = str(self._te_page_info.toPlainText())
+    return page_info
+  #}
+
+  ###
+  # \function getPageInfo
+  # \brief    Access the iip server path.
+  # \return   The iip server path.
+  ###
+  def getIIPSrv(self): #{
+    iip_srv = str(self._le_iip_srv.text())
+    return iip_srv
+  #}
+
+  ###
+  # \function getPageInfo
+  # \brief    Access the reference actor index.
+  # \return   The reference actor index.
+  ###
+  def getRefIdx(self): #{
+    ref_idx = self._sb_ref_idx.value()
+    return ref_idx
+  #}
+
+#}
 
 ###
 # \class       MAVTKSurfViewer
@@ -720,12 +1132,14 @@ class MovieCreationDialog(QtGui.QDialog): #{
 #              This has a menu bar, render window and status bar.
 ###
 class MAVTKSurfViewer(QtGui.QMainWindow): #{
-  _version = '1.0.0'
+  _version = '1.1.0'
   _actor_file_ident = 'MAVTKSurfViewer Actor Settings'
   _file_formats = ['obj', 'stl', 'vtk']
   _animation = 0
   _home = None
   _movie = None
+  _export_mar = None
+  _export_marv = None
 
   def __init__(self, files): #{
     super(MAVTKSurfViewer, self).__init__()
@@ -735,19 +1149,40 @@ class MAVTKSurfViewer(QtGui.QMainWindow): #{
     self.initUI(files)
   #}
 
+  ###
+  # \function   toggleDebug
+  # \brief      Slot which toggle the debug state.
+  ###
+  def toggleDebug(self): #{
+    global _debug
+    _debug = not _debug
+    if _debug: #{
+      s = 'on'
+    else: #}{
+      s = 'off'
+    #}
+    warnMsg('Debugging ' + s)
+  #}
+
+  ###
+  # \function   initUI
+  # \brief      Creates the application main window.
+  ###
   def initUI(self, files): #{
+    global _debug
     iCol = [1.0, 1.0, 1.0]
     ## Actor table
     self._actors = MAVTKActorTable()
     ### Menubar
     menubar = self.menuBar()
     fMenu = menubar.addMenu('&File')
+    eMenu = menubar.addMenu('&Edit')
     aMenu = menubar.addMenu('&Actions')
     vMenu = menubar.addMenu('&View')
     menubar.addSeparator()
     hMenu = menubar.addMenu('&Help')
     ## 
-    fOpen = QtGui.QAction(QtGui.QIcon('open.png'), 'Open', self)
+    fOpen = QtGui.QAction(QtGui.QIcon('open.png'), 'Open Actor', self)
     fOpen.setShortcut('Ctrl+O')
     fOpen.setStatusTip('Open new surface file')
     fOpen.triggered.connect(self.openFile)
@@ -765,17 +1200,22 @@ class MAVTKSurfViewer(QtGui.QMainWindow): #{
     fSaveActors.triggered.connect(self.saveActors)
     fMenu.addAction(fSaveActors)
     #
-    fExportActorsForWeb = QtGui.QAction(QtGui.QIcon('save.png'), \
-                                  'Export Actors as Web Page', self)
-    fExportActorsForWeb.setStatusTip('Export Actors as Web Page')
-    fExportActorsForWeb.triggered.connect(self.exportActorsForWeb)
-    fMenu.addAction(fExportActorsForWeb)
+    self._export_mar = ExportMARDialog()
+    fExportActorsMAR = QtGui.QAction(
+                                'Export Actors as MARender Web Page', self)
+    fExportActorsMAR.setStatusTip('Export actors as MARender web page')
+    fExportActorsMAR.triggered.connect(self.setupExportActorsForMAR)
+    self._export_mar.accepted.connect(self.exportActorsForMAR)
+    fMenu.addAction(fExportActorsMAR)
     # 
-    fExportActorsForMARV = QtGui.QAction(QtGui.QIcon('save.png'), \
-                           'Export Actors as MARenderView config', self)
-    fExportActorsForMARV.setStatusTip('Export Actors as MARenderView config')
-    fExportActorsForMARV.triggered.connect(self.exportActorsForMARV)
-    fMenu.addAction(fExportActorsForMARV)
+    self._export_marv = ExportMARVDialog()
+    fExportActorsMARV = QtGui.QAction(
+                            'Export Actors as MARenderView config', self)
+    fExportActorsMAR.setStatusTip( \
+        'Export actors as MARenderView configuration file')
+    fExportActorsMARV.triggered.connect(self.setupExportActorsForMARV)
+    self._export_marv.accepted.connect(self.exportActorsForMARV)
+    fMenu.addAction(fExportActorsMARV)
     #
     fLoadActors = QtGui.QAction(QtGui.QIcon('save.png'), \
                                 'Load Actor Settings', self)
@@ -788,6 +1228,13 @@ class MAVTKSurfViewer(QtGui.QMainWindow): #{
     fExit.setStatusTip('Exit Application')
     fExit.triggered.connect(self.quit)
     fMenu.addAction(fExit)
+    ##
+    eDebug = QtGui.QAction('Debugging', eMenu, checkable=True)
+    eDebug.setShortcut('Ctrl+D')
+    eDebug.setStatusTip('Enable/disable debug messages.')
+    eDebug.triggered.connect(self.toggleDebug)
+    eDebug.setChecked(_debug)
+    eMenu.addAction(eDebug)
     ##
     self._movie = MovieCreationDialog()
     aMovie = QtGui.QAction('Create Movie', self)
@@ -860,8 +1307,9 @@ class MAVTKSurfViewer(QtGui.QMainWindow): #{
     #}
     # Add pick observer
     self.ren.getPicker().AddObserver("EndPickEvent", self.cellPicked)
-    # Reset the camera to view all
+    # Reset the camera to view all and make it the initial home view
     self.ren.getRen().ResetCamera()
+    self.setHome()
   #}
 
   ###
@@ -897,19 +1345,35 @@ class MAVTKSurfViewer(QtGui.QMainWindow): #{
     return r
   #}
 
+  ###
+  # \function quit
+  # \brief    Slot to quit the application.
+  ###
   def quit(self): #{
     sys.exit(0)
   #}
 
 
+  ###
+  # \function   showAbout
+  # \brief      Slot to show the application about dialog.
+  ###
   def showAbout(self): #{
     self.about.show()
   #}
 
+  ###
+  # \function   showControls
+  # \brief      Slot to show the controls help dialog.
+  ###
   def showControls(self): #{
     self.controls.show()
   #}
 
+  ###
+  # \function   cellPicked
+  # \brief      Handles VTK actor being picked.
+  ###
   def cellPicked(self, object, event): #{
     picker = self.ren.getPicker()
     pt = picker.GetPointId()
@@ -1002,7 +1466,7 @@ class MAVTKSurfViewer(QtGui.QMainWindow): #{
                'All files (*)')
     if(path): #{
       if not self.ren.writeFrameToFile(path):
-        QtGui.QMessageBox.critical(self.frame,
+        QtGui.QMessageBox.critical(self,
                    'Error',
                    'Failed to write image to file ' + path + '.',
                    QtGui.QMessageBox.Close)
@@ -1053,16 +1517,65 @@ class MAVTKSurfViewer(QtGui.QMainWindow): #{
   #}
 
   ###
-  # \function exportActorsForWeb
+  # \function setupExportActorsForMAR
+  # \brief    Sets parameters required to export the current actor
+  #           settings to a web page which uses MARender and three.js
+  ###
+  def setupExportActorsForMARV(self): #{
+    self._export_marv.show()
+  #}
+
+  ###
+  # \function setupExportActorsForMAR
+  # \brief    Sets parameters required to export the current actor
+  #           settings to a web page which uses MARender and three.js
+  ###
+  def setupExportActorsForMAR(self): #{
+    self._export_mar.show()
+  #}
+
+  ###
+  # \function exportActorsForMAR
   # \brief    Prompts for a file path and then exports the current actor
   #           settings to a web page which uses MARender and three.js
   ###
-  def exportActorsForWeb(self): #{
+  def exportActorsForMAR(self): #{
+    ttl = self._export_mar.getPageTitle()
+    inf = self._export_mar.getPageInfo()
     path = QtGui.QFileDialog.getSaveFileName(self,
                'Export actors for web page',
                self._current_path,
                'HTML files (*.html);;All files (*)')
-    page_text = html_page_begin
+    page_text = html_page[0] + \
+                '\n<title>' + ttl + '</title>\n' + \
+                html_page[1] + \
+                '\n<div id="info">\n' + inf + '\n</div>\n' + \
+                html_page[2];
+    pos = self._home.position
+    cen = self._home.focalPoint
+    rng = self._home.clippingRange
+    up = self._home.viewUp
+    page_text = page_text + \
+                '\n' + \
+                'ren.setCamera(' + \
+                  'new THREE.Vector3(' + \
+                    str(cen[0]) + ', ' + \
+                    str(cen[1]) + ', ' + \
+                    str(cen[2]) + '), ' + \
+                  str(rng[0]) + ', ' + str(rng[1]) + ', ' + \
+                  'new THREE.Vector3(' + \
+                    str(pos[0]) + ', ' + \
+                    str(pos[1]) + ', ' + \
+                    str(pos[2]) + '));\n' + \
+                'ren.setHome(' + \
+                  'new THREE.Vector3(' + \
+                    str(pos[0]) + ', ' + \
+                    str(pos[1]) + ', ' + \
+                    str(pos[2]) + '),' + \
+                  'new THREE.Vector3(' + \
+                    str(up[0]) + ', ' + \
+                    str(up[1]) + ', ' + \
+                    str(up[2]) + '));\n'
     n_act = self._actors.getNumActors()
     for idx in range(0, n_act): #{
       if self._actors.getActorVisability(idx): #{
@@ -1080,7 +1593,7 @@ class MAVTKSurfViewer(QtGui.QMainWindow): #{
                     '              mode:        MARenderMode.PHONG});\n'
       #}
     #}
-    page_text = page_text + html_page_end
+    page_text = page_text + html_page[3]
     try: #{
       f = io.open(str(path), 'w')
       f.write(unicode(page_text))
@@ -1094,7 +1607,7 @@ class MAVTKSurfViewer(QtGui.QMainWindow): #{
   #}
 
   ###
-  # \function exportActorsForWeb
+  # \function exportActorsForMARV
   # \brief    Prompts for a file path and then exports the current actor
   #           settings to a json MARenderView configuration file.
   ###
@@ -1103,7 +1616,22 @@ class MAVTKSurfViewer(QtGui.QMainWindow): #{
                'Export actors for MARenderView',
                self._current_path,
                'Json files (*.jsn *.json);;All files (*)')
+    ttl = self._export_marv.getPageTitle()
+    inf = self._export_marv.getPageInfo()
+    iip_srv = self._export_marv.getIIPSrv()
+    ref_idx = self._export_marv.getRefIdx()
     n_act = self._actors.getNumActors()
+    pos = self._home.position
+    cen = self._home.focalPoint
+    rng = self._home.clippingRange
+    up = self._home.viewUp
+    three_view = { \
+                   'cen':  {'x': cen[0], 'y': cen[1], 'z': cen[2]}, \
+                   'near': rng[0], \
+                   'far':  rng[1],
+                   'pos':  {'x': pos[0], 'y': pos[1], 'z': pos[2]},
+                   'up':   {'x': up[0], 'y': up[1], 'z': up[2]}
+                 }
     section_view = { \
                      'dst': 0, \
                      'pit': 0, \
@@ -1136,13 +1664,14 @@ class MAVTKSurfViewer(QtGui.QMainWindow): #{
       #}
     #}
     config = { \
-      'title': 'Export from VAVTKSurfViewer', \
-      'info': 'Export from VAVTKSurfViewer (version ' + \
-              self._version + ').', \
-      'iip3dsrv': 'http://localhost/fcgi-bin/wlziipsrv.fcgi', \
-      'show_gui': True,
-      'section_view': section_view, \
-      'section': section, \
+      'title': ttl,
+      'info': inf,
+      'three_view': three_view,
+      'iip3dsrv': iip_srv, 
+      'show_gui': False,
+      'outer_idx': ref_idx,
+      'section_view': section_view,
+      'section': section, 
       'domains': domains
       }
     if(path): #{
@@ -1229,30 +1758,60 @@ class MAVTKSurfViewer(QtGui.QMainWindow): #{
     #}
   #}
 
+  ###
+  # \function   getNumActors
+  # \brief      Access method to get the number of actors.
+  # \return     Number of actors.
+  ###
   def getNumActors(self): #{
     return self._table.rowCount()
   #}
 
+  ###
+  # \function   getActor
+  # \brief      Access the actor corresponding to the given index.
+  # \return     Actor.
+  ###
   def getActor(self, idx): #{
     actor = self._actors[idx]
     return actor
   #}
 
+  ###
+  # \function   getActorName
+  # \brief      Access the name of the actor with the given index.
+  # \return     Actor name string.
+  ###
   def getActorName(self, idx): #{
     name = str(self._table.item(idx, self.tableDict['Name']).text())
     return name
   #}
 
+  ###
+  # \function   getActorColor
+  # \brief      Access the actor colour for the actor with the given index.
+  # \return     Actor colour (QColor).
+  ###
   def getActorColor(self, idx): #{
     q_col = self._table.item(idx, self.tableDict['Color']).backgroundColor()
     return q_col
   #}
 
+  ###
+  # \function   getActorOpacity
+  # \brief      Access the opacity of the actor with the given index.
+  # \return     Actor opacity.
+  ###
   def getActorOpacity(self, idx): #{
     opacity = float(self._table.item(idx, self.tableDict['Opacity']).text())
     return opacity
   #}
 
+  ###
+  # \function   getActorPath
+  # \brief      Access the file path of the actor with the given index.
+  # \return     Actor file path string.
+  ###
   def getActorPath(self, idx): #{
     path = str(self._table.item(idx, self.tableDict['Path']).text())
 
@@ -1361,6 +1920,10 @@ class MAVTKSurfViewer(QtGui.QMainWindow): #{
     #}
   #}
 
+  ###
+  # \function showTable
+  # \brief    Slot to show the actor table.
+  ###
   def showTable(self): #{
     if self._actors.isVisible(): #{
       self._actors.hide()
@@ -1369,15 +1932,29 @@ class MAVTKSurfViewer(QtGui.QMainWindow): #{
     #}
   #}
 
+  ###
+  # \function goHome
+  # \brief    Slot which presents the scene home view.
+  ###
   def goHome(self): #{
     if bool(self._home): #{
       self.ren.setView(self._home)
     #}
   #}
 
+  ###
+  # \function setHome
+  # \brief    Slot which sets the scene home view to the current view.
+  ###
   def setHome(self): #{
     self._home = self.ren.getView()
-    print(self._home)
+    debugMsg('Setting home:\n' + \
+      'position = ' + str(self._home.position) + '\n' + \
+      'focalPoint = ' + str(self._home.focalPoint) + '\n' + \
+      'viewUp = ' + str(self._home.viewUp) + '\n' + \
+      'viewAngle = ' + str(self._home.viewAngle) + '\n' + \
+      'parallelScale = ' + str(self._home.parallelScale) + '\n' + \
+      'clippingRange = ' + str(self._home.clippingRange) + '\n')
   #}
 
   ###
@@ -1439,11 +2016,15 @@ class MAVTKSurfViewer(QtGui.QMainWindow): #{
 #            main application constructor.
 ###
 def main(): #{
+  global _debug
   app = QtGui.QApplication(sys.argv)
   parser = argparse.ArgumentParser(
       description='Interactive display of surfaces.',
       epilog='Supported surface formats are: ' +
              str(MAVTKSurfViewer._file_formats) + '.\n')
+  parser.add_argument('-d', '--debug',
+      action='store_true', default=False, \
+      help='Set debugging to stderr on.')
   parser.add_argument('-v', '--version',
       action='store_true', default=False, \
       help='Show version and exit.')
@@ -1452,6 +2033,11 @@ def main(): #{
   if(args.version): #{
     print(MAVTKSurfViewer._version)
     sys.exit(0)
+  #}
+  if(args.debug): #{
+    print('HACK ' + str(_debug))
+    _debug = True
+    print('HACK ' + str(_debug))
   #}
   sv = MAVTKSurfViewer(args.file)
   sys.exit(app.exec_())
