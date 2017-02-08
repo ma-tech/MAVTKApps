@@ -41,6 +41,7 @@ from __future__ import print_function
 
 import io
 import os
+import re
 import sys
 import json
 import math
@@ -1223,6 +1224,12 @@ class MAVTKSurfViewer(QtGui.QMainWindow): #{
     fLoadActors.triggered.connect(self.loadActors)
     fMenu.addAction(fLoadActors)
     #
+    fImportITKSnap = QtGui.QAction(QtGui.QIcon('save.png'), \
+                                'Import ITK-SnAP Label Surfaces', self)
+    fImportITKSnap.setStatusTip('Import ITK-SnAP Label Surfaces')
+    fImportITKSnap.triggered.connect(self.importITKSnap)
+    fMenu.addAction(fImportITKSnap)
+    #
     fExit  = QtGui.QAction(QtGui.QIcon('exit.png'), 'Exit', self)
     fExit.setShortcut('Ctrl+Q')
     fExit.setStatusTip('Exit Application')
@@ -1691,7 +1698,7 @@ class MAVTKSurfViewer(QtGui.QMainWindow): #{
 
   ###
   # \function  loadActors
-  # \brief     Prompts for a file path and then reads acor settings from the
+  # \brief     Prompts for a file path and then reads actor settings from the
   #            file, where these have been saved using the json format of
   #            saveActors(). The actors are added and do not replace existing
   #            actors.
@@ -1748,10 +1755,74 @@ class MAVTKSurfViewer(QtGui.QMainWindow): #{
           self.addSurf(visible, name, v_col, opacity, path)
         #}
       #}
-      if not bool(data): #{
+      if bool(data): #{
+        self.resetView()
+      else: # }{
         QtGui.QMessageBox.critical(self,
             'Error',
             'Failed to write actor setting to file ' + path + '.',
+            QtGui.QMessageBox.Close)
+               
+      #}
+    #}
+  #}
+
+  ###
+  # \function  importITKSnap
+  # \brief     Prompts for a file path and then reads actor settings from the
+  #            file, where these have been saved using the ITK-SnAP label
+  #            deescription file format. The actors are added and do not
+  #            replace existing actors.
+  ###
+  def importITKSnap(self): #{
+    path = QtGui.QFileDialog.getOpenFileName(self, 'Import ITK-SnAP Surfaces',
+               self._current_path,
+               'Text files (*.txt);;All files (*)')
+    if bool(path): #{
+      n_act = 0
+      ln_num = 1
+      data = None
+      valid = False;
+      try: #{
+        f = io.open(str(path), 'r')
+        for ln in f: #{
+          rec = str(ln)
+          ln_num = ln_num + 1
+          if not valid: #{
+            valid = bool(re.match('^#.*ITK.SnAP Label Description File', rec))
+          else: #}{
+            if not re.match('^#', rec): #{
+              fld = rec.split()
+              if len(fld) < 8: #{
+                raise
+              #}
+              idx = int(fld[0])
+              col = [float(fld[1]) / 255.0, \
+                     float(fld[2]) / 255.0, \
+                     float(fld[3]) / 255.0]
+              opy = float(fld[4])
+              isvis = int(fld[5]) > 0
+              ismesh = int(fld[6]) > 0
+              if ismesh: #{
+                name = re.sub('"', '', ' '.join(fld[7:]))
+                mesh_path = re.sub('\.txt$', '{:05d}'.format(idx) + '.vtk', \
+                                   str(path))
+                self.addSurf(isvis, name, col, opy, mesh_path)
+              #}
+            #}
+          #}
+        #}
+      except Exception as e: #}{
+        print(str(e))
+        valid = False;
+      #}
+      if valid: #{
+        self.resetView()
+      else: # }{
+        QtGui.QMessageBox.critical(self,
+            'Error',
+            'Failed to import actors from ITK SnAP file ' + path + \
+                ' (line ' + str(ln_num) + ')',
             QtGui.QMessageBox.Close)
                
       #}
@@ -2035,9 +2106,7 @@ def main(): #{
     sys.exit(0)
   #}
   if(args.debug): #{
-    print('HACK ' + str(_debug))
     _debug = True
-    print('HACK ' + str(_debug))
   #}
   sv = MAVTKSurfViewer(args.file)
   sys.exit(app.exec_())
