@@ -48,6 +48,7 @@ import math
 import time
 import argparse
 from PyQt5 import QtCore, QtGui, QtWidgets
+from PyQt5.QtCore import QT_VERSION_STR, PYQT_VERSION_STR
 import vtk
 from vtk.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
 
@@ -614,10 +615,14 @@ class AboutDialog(QtWidgets.QDialog): #{
   #}
 
   def initUI(self, version): #{
-    msg = '<b>MAVTKSurfViewer</b>' + \
-          '<p>Version ' + version + '.</p>' + \
-          '<p>A VTK based multiple surface viewer.</p>' + \
-          '<p>ma-tech@igmm.ed.ac.uk</p>'
+    msg = ('<b>MAVTKSurfViewer</b>' +
+           '<p>Version ' + version + '.</p>' +
+           '<p>A VTK based multiple surface viewer.</p>' +
+           '<p>ma-tech@igmm.ed.ac.uk</p>' +
+           '<p></p>' +
+           '<p>python=' + sys.version + '</p>' +
+           '<p>qt=' + QT_VERSION_STR + ', pyqt=' + PYQT_VERSION_STR +
+               ', vtk=' + vtk.vtkVersion().GetVTKVersion() + '</p>')
     lo = QtWidgets.QVBoxLayout(self)
     txt = QtWidgets.QLabel(msg)
     lo.addWidget(txt)
@@ -2112,7 +2117,10 @@ def main(): #{
   parser.add_argument('file', nargs='*')
   args = parser.parse_args()
   if(args.version): #{
-    print(MAVTKSurfViewer._version)
+    print('MAVTKSurfViewer=' + MAVTKSurfViewer._version)
+    print('python=' + sys.version)
+    print('qt=' + QT_VERSION_STR + ', pyqt=' + PYQT_VERSION_STR)
+    print('vtk=' + vtk.vtkVersion().GetVTKVersion())
     sys.exit(0)
   #}
   if(args.debug): #{
